@@ -396,73 +396,13 @@ Column {
             }
 
             MetaLine {
-              text: root.transfers.length + " transfer" + (root.transfers.length === 1 ? "" : "s")
-                    + "  ·  " + root.mounts.length + " mount" + (root.mounts.length === 1 ? "" : "s")
-            }
-          }
-        }
-
-        // Running transfers
-        Card {
-          visible: root.transfers.length > 0
-          implicitHeight: runCol.implicitHeight + Style.space(20)
-          Column {
-            id: runCol
-            anchors.fill: parent
-            anchors.margins: Style.space(10)
-            spacing: Style.space(8)
-
-            Text {
-              text: "Active transfers"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-            }
-
-            Repeater {
-              model: root.transfers
-              delegate: Column {
-                required property var modelData
-                width: parent.width
-                spacing: Style.space(2)
-
-                Row {
-                  width: parent.width
-                  spacing: Style.space(6)
-                  Text {
-                    text: Model.operationIcon(modelData.operation)
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                  }
-                  Pill {
-                    anchors.verticalCenter: parent.verticalCenter
-                    label: Model.syncKindLabel(modelData.operation)
-                    labelColor: Color.accent
-                  }
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.speed_formatted && modelData.speed_formatted !== "—"
-                            ? modelData.speed_formatted : ""
-                    color: root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-                }
-
-                Text {
-                  width: parent.width
-                  text: (modelData.source ? modelData.source : "")
-                        + (modelData.destination ? "  →  " + modelData.destination : "")
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideMiddle
-                }
-                MetaLine {
-                  text: "pid " + modelData.pid + " · " + modelData.elapsed + " · cpu " + modelData.cpu + "%"
-                }
+              text: {
+                var parts = []
+                if (root.transfers.length > 0)
+                  parts.push(root.transfers.length + " transfer" + (root.transfers.length === 1 ? "" : "s") + " running")
+                if (root.mounts.length > 0)
+                  parts.push(root.mounts.length + " mount" + (root.mounts.length === 1 ? "" : "s"))
+                return parts.join("  ·  ")
               }
             }
           }
@@ -532,19 +472,34 @@ Column {
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(2)
 
-              Row {
-                spacing: Style.space(6)
+              Item {
+                width: parent.width
+                height: nextName.implicitHeight
+
                 Text {
+                  id: nextName
+                  anchors.left: parent.left
+                  anchors.right: nextTags.left
+                  anchors.rightMargin: Style.space(6)
                   text: "Next: " + (root.nextTimer ? root.nextTimer.profile : "")
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.bodySmall
                   font.bold: true
+                  elide: Text.ElideRight
                 }
-                Pill {
-                  anchors.verticalCenter: parent.verticalCenter
-                  label: root.nextTimer ? root.nextTimer.next_formatted : ""
-                  labelColor: Color.accent
+                Row {
+                  id: nextTags
+                  anchors.right: parent.right
+                  anchors.verticalCenter: nextName.verticalCenter
+                  spacing: Style.space(4)
+                  Pill {
+                    label: root.nextTimer ? root.nextTimer.next_formatted : ""
+                    labelColor: Color.accent
+                  }
+                  Pill {
+                    label: root.nextTimer ? Model.syncKindLabel(root.nextTimer.sync_type) : ""
+                  }
                 }
               }
 
@@ -553,8 +508,7 @@ Column {
                 text: "󰉋 " + (root.nextTimer ? root.nextTimer.local_path : "") + "  →  󰅟 " + (root.nextTimer ? root.nextTimer.remote_path : "")
               }
               MetaLine {
-                text: (root.nextTimer ? Model.syncKindLabel(root.nextTimer.sync_type) : "")
-                      + " · last run " + (root.nextTimer ? root.nextTimer.last_formatted : "n/a")
+                text: "last run " + (root.nextTimer ? root.nextTimer.last_formatted : "n/a")
               }
             }
 
@@ -755,23 +709,32 @@ Column {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(2)
 
-                Row {
-                  spacing: Style.space(6)
+                Item {
+                  width: parent.width
+                  height: timerName.implicitHeight
+
                   Text {
+                    id: timerName
+                    anchors.left: parent.left
+                    anchors.right: timerTags.left
+                    anchors.rightMargin: Style.space(6)
                     text: (modelData.is_running ? "󰑮  " : "") + modelData.profile
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
                     font.bold: true
+                    elide: Text.ElideRight
                   }
-                  Pill {
-                    anchors.verticalCenter: parent.verticalCenter
-                    label: Model.syncKindLabel(modelData.sync_type)
-                    labelColor: Color.accent
-                  }
-                  Pill {
-                    anchors.verticalCenter: parent.verticalCenter
-                    label: modelData.scope
+                  Row {
+                    id: timerTags
+                    anchors.right: parent.right
+                    anchors.verticalCenter: timerName.verticalCenter
+                    spacing: Style.space(4)
+                    Pill {
+                      label: Model.syncKindLabel(modelData.sync_type)
+                      labelColor: Color.accent
+                    }
+                    Pill { label: modelData.scope }
                   }
                 }
 
@@ -924,14 +887,33 @@ Column {
                 width: parent.width - mountActions.width - parent.spacing
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(2)
-                Text {
+
+                Item {
                   width: parent.width
-                  text: "󱂵  " + modelData.target
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
-                  elide: Text.ElideMiddle
+                  height: mountTarget.implicitHeight
+
+                  Text {
+                    id: mountTarget
+                    anchors.left: parent.left
+                    anchors.right: mountTag.left
+                    anchors.rightMargin: Style.space(6)
+                    text: "󱂵  " + modelData.target
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                    elide: Text.ElideMiddle
+                  }
+                  Pill {
+                    id: mountTag
+                    anchors.right: parent.right
+                    anchors.verticalCenter: mountTarget.verticalCenter
+                    label: {
+                      var o = String(modelData.options || "").split(",")[0]
+                      return (o === "rw" || o === "ro") ? o : "fuse"
+                    }
+                    labelColor: Color.accent
+                  }
                 }
                 MetaLine { text: modelData.source }
               }
