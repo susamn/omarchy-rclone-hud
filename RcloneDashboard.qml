@@ -16,6 +16,16 @@ Item {
   signal runAction(string cmd, string arg1, string arg2)
   signal closeRequested()
 
+  // QML signal emission is strict about arity: emitting runAction() with
+  // fewer than three arguments throws "Insufficient arguments". Route every
+  // call site through this helper so optional args default to "".
+  function doAction(cmd, arg1, arg2) {
+    root.runAction(
+      cmd,
+      (arg1 === undefined || arg1 === null) ? "" : String(arg1),
+      (arg2 === undefined || arg2 === null) ? "" : String(arg2))
+  }
+
   property int currentTab: 0 // 0: Overview, 1: Schedules, 2: Remotes, 3: Mounts, 4: History
 
   readonly property var processes: (status && status.processes) ? status.processes : []
@@ -154,7 +164,7 @@ Item {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
-          onClicked: root.runAction("refresh")
+          onClicked: root.doAction("refresh")
         }
       }
 
@@ -434,7 +444,7 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     if (nextTimer) {
-                      root.runAction("sync", nextTimer.service_unit || nextTimer.profile)
+                      root.doAction("sync", nextTimer.service_unit || nextTimer.profile)
                     }
                   }
                 }
@@ -742,7 +752,7 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.runAction("sync", modelData.service_unit || modelData.profile)
+                    onClicked: root.doAction("sync", modelData.service_unit || modelData.profile)
                   }
                 }
               }
@@ -987,7 +997,7 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.runAction("open_folder", modelData.target)
+                    onClicked: root.doAction("open_folder", modelData.target)
                   }
                 }
 
@@ -1014,7 +1024,7 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.runAction("unmount", modelData.target)
+                    onClicked: root.doAction("unmount", modelData.target)
                   }
                 }
               }
