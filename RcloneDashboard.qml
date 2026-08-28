@@ -31,7 +31,7 @@ Column {
       (arg2 === undefined || arg2 === null) ? "" : String(arg2))
   }
 
-  // 0 Overview · 1 Schedules · 2 Storages · 3 Mounts · 4 History
+  // 0 Overview · 1 Schedules · 2 Mounts · 3 Storages · 4 History
   property int currentTab: 0
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -308,7 +308,7 @@ Column {
     spacing: Style.space(4)
 
     Repeater {
-      model: ["Overview", "Schedules", "Storages", "Mounts", "History"]
+      model: ["Overview", "Schedules", "Mounts", "Storages", "History"]
       delegate: Button {
         required property int index
         required property string modelData
@@ -428,7 +428,7 @@ Column {
               MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.currentTab = 3
+                onClicked: root.currentTab = 2
               }
             }
 
@@ -697,7 +697,7 @@ Column {
     // ------------------------------------------------------------- Storages
     Flickable {
       anchors.fill: parent
-      visible: root.installed && root.currentTab === 2
+      visible: root.installed && root.currentTab === 3
       contentHeight: remotesCol.implicitHeight
       clip: true
       boundsBehavior: Flickable.StopAtBounds
@@ -783,7 +783,7 @@ Column {
     // ------------------------------------------------------------- Mounts
     Flickable {
       anchors.fill: parent
-      visible: root.installed && root.currentTab === 3
+      visible: root.installed && root.currentTab === 2
       contentHeight: mountsCol.implicitHeight
       clip: true
       boundsBehavior: Flickable.StopAtBounds
