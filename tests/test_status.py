@@ -17,6 +17,14 @@ class TestStatusScript(unittest.TestCase):
         self.assertEqual(status.parse_size(None), "N/A")
         self.assertEqual(status.parse_size("invalid"), "N/A")
 
+    def test_sanitize_usec(self):
+        self.assertEqual(status.sanitize_usec(0), 0)
+        self.assertEqual(status.sanitize_usec(None), 0)
+        self.assertEqual(status.sanitize_usec("nope"), 0)
+        self.assertEqual(status.sanitize_usec(2 ** 64 - 1), 0)
+        self.assertEqual(status.sanitize_usec(2 ** 63 - 1), 0)
+        self.assertEqual(status.sanitize_usec(1723000000000000), 1723000000000000)
+
     def test_format_relative_time(self):
         now_s = 1000000.0
         # 10 minutes in future

@@ -208,6 +208,24 @@ def get_fuse_mounts():
         pass
     return mounts
 
+# systemd's JSON output uses UINT64_MAX (and occasionally INT64_MAX) as an
+# "unset" sentinel for timer next/last fields rather than 0 or null. Treat any
+# absurdly large value as "no timestamp" so it never becomes a bogus timer far
+# in the future.
+_USEC_SENTINELS = (2 ** 64 - 1, 2 ** 63 - 1)
+_MAX_PLAUSIBLE_USEC = 4102444800 * 1000000  # year 2100 in microseconds
+
+
+def sanitize_usec(value):
+    try:
+        v = int(value)
+    except (ValueError, TypeError):
+        return 0
+    if v <= 0 or v in _USEC_SENTINELS or v > _MAX_PLAUSIBLE_USEC:
+        return 0
+    return v
+
+
 def format_relative_time(epoch_us, now_s):
     if not epoch_us or epoch_us <= 0:
         return "N/A"
@@ -346,8 +364,8 @@ def get_scheduled_timers():
                     sync_type = enriched.get("sync_type", sync_type)
                     direction = enriched.get("direction", direction)
 
-            next_us = t.get("next", 0)
-            last_us = t.get("last", 0)
+            next_us = sanitize_usec(t.get("next", 0))
+            last_us = sanitize_usec(t.get("last", 0))
 
             next_hour = -1.0
             if next_us and next_us > 0:
