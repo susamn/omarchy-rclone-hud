@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "susamn.rclone",
+  "name": "Rclone Sync & Monitor",
+  "version": "1.0.0",
+  "author": "susamn",
+  "license": "MIT",
+  "description": "Universal Rclone visualizer: active sync processes, timers & 24h schedule timeline, remote storage gauges, and FUSE mounts.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Rclone",
+    "description": "Monitor rclone sync jobs, timers, remote storage, and mounts.",
+    "category": "Cloud",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "pollIntervalClosedSec": 10,
+      "pollIntervalOpenSec": 2
+    },
+    "schema": [
+      {
+        "key": "pollIntervalClosedSec",
+        "type": "integer",
+        "label": "Closed refresh interval (seconds)",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 10,
+        "description": "How often rclone status is polled while the popup panel is closed."
+      },
+      {
+        "key": "pollIntervalOpenSec",
+        "type": "integer",
+        "label": "Open refresh interval (seconds)",
+        "min": 1,
+        "max": 10,
+        "step": 1,
+        "defaultValue": 2,
+        "description": "How often rclone status is polled while the popup panel is open."
+      }
+    ]
+  }
+}
