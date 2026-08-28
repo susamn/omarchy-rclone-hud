@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "susamn.rclone",
   "name": "Rclone Sync & Monitor",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "susamn",
   "license": "MIT",
   "description": "Universal Rclone visualizer: active sync processes, timers & 24h schedule timeline, remote storage gauges, and FUSE mounts.",

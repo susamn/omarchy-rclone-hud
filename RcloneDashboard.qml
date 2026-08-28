@@ -43,6 +43,10 @@ Column {
   readonly property var cardBorder: Border.flat(faint, 1)
 
   readonly property var processes: (status && status.processes) ? status.processes : []
+  // Only data-moving operations. A persistent `rclone mount` daemon is not a
+  // transfer — its /proc counters tick on every VFS poll, which otherwise
+  // made the Overview card and speed graph twitch a few times a minute.
+  readonly property var transfers: root.processes.filter(function(p) { return p && p.is_transfer === true })
   readonly property var remotes: (status && status.remotes) ? status.remotes : []
   readonly property var mounts: (status && status.mounts) ? status.mounts : []
   readonly property var timers: (status && status.timers) ? status.timers : []
@@ -59,7 +63,7 @@ Column {
   property real speedPeak: 1
 
   function updateSpeedSeries() {
-    var procs = (status && status.processes) ? status.processes : []
+    var procs = root.transfers
     var next = ({})
     var peak = 1
     for (var i = 0; i < procs.length; i++) {
@@ -91,7 +95,7 @@ Column {
   }
 
   readonly property var speedGraphSeries: {
-    var procs = (status && status.processes) ? status.processes : []
+    var procs = root.transfers
     var out = []
     for (var i = 0; i < procs.length; i++)
       out.push({ points: speedSeries[String(procs[i].pid)] || [], color: seriesColor(i) })
@@ -234,12 +238,38 @@ Column {
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(2)
 
-      Text {
-        text: "Rclone"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
+      Row {
+        spacing: Style.space(6)
+
+        Text {
+          text: "Rclone"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+        }
+
+        // Sync LED: pulsing accent while a transfer runs, dim when idle,
+        // urgent when rclone is missing.
+        Rectangle {
+          id: syncLed
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(7)
+          height: Style.space(7)
+          radius: width / 2
+          color: !root.installed ? Color.urgent
+                 : root.syncing ? Color.accent
+                 : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25)
+
+          SequentialAnimation {
+            id: syncLedPulse
+            running: root.syncing
+            loops: Animation.Infinite
+            onRunningChanged: if (!running) syncLed.opacity = 1.0
+            NumberAnimation { target: syncLed; property: "opacity"; from: 1.0; to: 0.3; duration: 720; easing.type: Easing.InOutSine }
+            NumberAnimation { target: syncLed; property: "opacity"; from: 0.3; to: 1.0; duration: 720; easing.type: Easing.InOutSine }
+          }
+        }
       }
 
       Text {
@@ -337,9 +367,9 @@ Column {
         width: parent.width
         spacing: Style.space(8)
 
-        // Running jobs
+        // Running transfers (mounts live on their own tab)
         Card {
-          visible: root.processes.length > 0
+          visible: root.transfers.length > 0
           implicitHeight: runCol.implicitHeight + Style.space(20)
           Column {
             id: runCol
@@ -377,7 +407,7 @@ Column {
             }
 
             Repeater {
-              model: root.processes
+              model: root.transfers
               delegate: Row {
                 required property var modelData
                 required property int index

@@ -83,6 +83,33 @@ Panel {
       if (b === Qt.MiddleButton) root.refreshStatus()
       else root.toggle()
     }
+
+    // Sync LED: a small pulsing dot in the corner of the bar icon while a
+    // transfer is actively running, so it reads at a glance without opening
+    // the panel. Ringed in the bar background so it stays legible on the glyph.
+    Rectangle {
+      id: syncLed
+      visible: root.isSyncRunning
+      width: Style.space(6)
+      height: Style.space(6)
+      radius: width / 2
+      z: 5
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.rightMargin: Style.space(3)
+      anchors.topMargin: Style.space(3)
+      color: Color.accent
+      border.width: 1
+      border.color: Color.bar.background
+
+      SequentialAnimation {
+        running: syncLed.visible
+        loops: Animation.Infinite
+        onRunningChanged: if (!running) syncLed.opacity = 1.0
+        NumberAnimation { target: syncLed; property: "opacity"; from: 1.0; to: 0.3; duration: 720; easing.type: Easing.InOutSine }
+        NumberAnimation { target: syncLed; property: "opacity"; from: 0.3; to: 1.0; duration: 720; easing.type: Easing.InOutSine }
+      }
+    }
   }
 
   KeyboardPanel {
