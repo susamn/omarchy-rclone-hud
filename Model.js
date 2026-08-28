@@ -33,8 +33,9 @@ function barTooltipText(status) {
     return "Rclone: Not found on PATH"
   }
   if (status.is_sync_running) {
-    var count = status.processes.filter(function(p) {
-      return p.operation === "sync" || p.operation === "bisync" || p.operation === "copy"
+    var procs = (status.processes && status.processes.length) ? status.processes : []
+    var count = procs.filter(function(p) {
+      return p.operation === "sync" || p.operation === "bisync" || p.operation === "copy" || p.operation === "move"
     }).length
     return "Rclone: " + count + " active sync job" + (count > 1 ? "s" : "") + " running"
   }
