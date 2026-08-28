@@ -16,6 +16,7 @@ function emptyStatus() {
     is_sync_running: false,
     active_processes_count: 0,
     total_speed_bps: 0,
+    total_bandwidth_bps: 0,
     processes: [],
     remotes_count: 0,
     remotes: [],
@@ -52,6 +53,21 @@ function barTooltipText(status) {
     return "Rclone: " + status.remotes_count + " remote" + (status.remotes_count > 1 ? "s" : "") + " configured"
   }
   return "Rclone: Idle"
+}
+
+// Human label for a transfer's direction/kind. Accepts rclone subcommands
+// (sync, bisync, copy, move, check) and the values status.py derives from
+// sync profiles (one, two, one-way, bi, ...).
+function syncKindLabel(kind) {
+  var k = String(kind || "").toLowerCase()
+  if (k === "bisync" || k === "bi" || k === "two" || k === "bidirectional" || k === "two-way") return "bi-directional"
+  if (k === "sync" || k === "one" || k === "oneway" || k === "one-way") return "one-way sync"
+  if (k === "copy") return "copy"
+  if (k === "move") return "move"
+  if (k === "check") return "check"
+  if (k === "mount") return "mount"
+  if (k === "cron") return "cron job"
+  return k || "sync"
 }
 
 function operationIcon(op) {
@@ -107,6 +123,7 @@ if (typeof module !== "undefined" && module.exports) {
     emptyStatus: emptyStatus,
     barTooltipText: barTooltipText,
     operationIcon: operationIcon,
+    syncKindLabel: syncKindLabel,
     formatPercent: formatPercent,
     clamp: clamp,
     calculateTimelineX: calculateTimelineX,

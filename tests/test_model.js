@@ -39,6 +39,20 @@ assert.strictEqual(Model.barTooltipText({
   next_timer: { profile: "music-tracks", next_formatted: "in 25m" }
 }), "Rclone: Next music-tracks in 25m")
 
+// 3b. syncKindLabel
+assert.strictEqual(Model.syncKindLabel("sync"), "one-way sync")
+assert.strictEqual(Model.syncKindLabel("one"), "one-way sync")
+assert.strictEqual(Model.syncKindLabel("bisync"), "bi-directional")
+assert.strictEqual(Model.syncKindLabel("two"), "bi-directional")
+assert.strictEqual(Model.syncKindLabel("copy"), "copy")
+assert.strictEqual(Model.syncKindLabel("cron"), "cron job")
+assert.strictEqual(Model.syncKindLabel(""), "sync")
+
+// 3c. formatRate / formatBytes
+assert.strictEqual(Model.formatBytes(0), "0 B")
+assert.strictEqual(Model.formatBytes(1536), "1.5 KB")
+assert.strictEqual(Model.formatRate(4404019), "4.2 MB/s")
+
 // 4. operationIcon
 assert.strictEqual(Model.operationIcon("sync"), "󰑮")
 assert.strictEqual(Model.operationIcon("bisync"), "󰁯")

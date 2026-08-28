@@ -560,7 +560,11 @@ def main():
         "installed": has_rclone,
         "is_sync_running": is_sync_running,
         "active_processes_count": len(processes),
+        # total_speed_bps: transfers only, for the "syncing" tooltip / LED.
+        # total_bandwidth_bps: every rclone process, incl. mounts streaming
+        # files — this is what the Overview bandwidth graph plots.
         "total_speed_bps": sum(int(p.get("speed_bps", 0)) for p in transfers),
+        "total_bandwidth_bps": sum(int(p.get("speed_bps", 0)) for p in processes),
         "processes": processes,
         "remotes_count": len(remotes),
         "remotes": remotes,
