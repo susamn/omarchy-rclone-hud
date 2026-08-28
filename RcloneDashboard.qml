@@ -180,7 +180,7 @@ Column {
       // The line itself.
       ShapePath {
         strokeColor: Color.accent
-        strokeWidth: 1.5
+        strokeWidth: 1
         fillColor: "transparent"
         capStyle: ShapePath.RoundCap
         joinStyle: ShapePath.RoundJoin
