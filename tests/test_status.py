@@ -53,6 +53,57 @@ class TestStatusScript(unittest.TestCase):
         finally:
             status.read_proc_io = orig_io
 
+    def test_quota_ttl_seconds(self):
+        orig_argv, orig_env = status.sys.argv, dict(os.environ)
+        try:
+            status.sys.argv = ["status.py", "--quota-ttl", "300"]
+            self.assertEqual(status.quota_ttl_seconds(), 300)
+            status.sys.argv = ["status.py", "--quota-ttl", "0"]
+            self.assertEqual(status.quota_ttl_seconds(), 0)
+            status.sys.argv = ["status.py"]
+            os.environ.pop("RCLONE_PANEL_QUOTA_TTL", None)
+            self.assertEqual(status.quota_ttl_seconds(default=42), 42)
+            os.environ["RCLONE_PANEL_QUOTA_TTL"] = "77"
+            self.assertEqual(status.quota_ttl_seconds(), 77)
+        finally:
+            status.sys.argv = orig_argv
+            os.environ.clear()
+            os.environ.update(orig_env)
+
+    def test_get_configured_remotes_uses_cache(self):
+        orig_run, orig_which = status.safe_run, status.shutil.which
+        calls = {"about": 0}
+
+        def fake_run(cmd, timeout=5):
+            if cmd[:2] == ["rclone", "listremotes"]:
+                return "gdrive: drive"
+            if cmd[:2] == ["rclone", "about"]:
+                calls["about"] += 1
+                return '{"total": 1000, "used": 400, "free": 600}'
+            return ""
+
+        try:
+            os.remove(status._quota_cache_path())
+        except OSError:
+            pass
+        try:
+            status.shutil.which = lambda _b: "/usr/bin/rclone"
+            status.safe_run = fake_run
+            first = status.get_configured_remotes(quota_ttl=900)
+            second = status.get_configured_remotes(quota_ttl=900)   # served from cache
+            forced = status.get_configured_remotes(quota_ttl=0)     # bypasses cache
+            self.assertEqual(calls["about"], 2)
+            self.assertTrue(first[0]["has_quota"])
+            self.assertTrue(second[0]["has_quota"])
+            self.assertEqual(second[0]["used_bytes"], 400)
+            self.assertTrue(forced[0]["has_quota"])
+        finally:
+            status.safe_run, status.shutil.which = orig_run, orig_which
+            try:
+                os.remove(status._quota_cache_path())
+            except OSError:
+                pass
+
     def test_sanitize_usec(self):
         self.assertEqual(status.sanitize_usec(0), 0)
         self.assertEqual(status.sanitize_usec(None), 0)

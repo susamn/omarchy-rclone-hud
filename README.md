@@ -11,6 +11,7 @@ Real-time monitoring of active sync processes, systemd & cron timers with a 24-h
 - **Universal & Zero-Secret Discovery**:
   - Works out-of-the-box on any Linux machine running `rclone` and `systemd`/`cron`.
   - Never reads or exposes passwords, auth tokens, client secrets, or GPG keys.
+- **API-friendly**: process, timer, and mount discovery are all local. The only provider-API call is `rclone about` for storage quota — its result is cached per remote (default **15 min**, `quotaRefreshMinutes` setting) so status polling never hits the API. The panel's Refresh button (or a middle-click on the bar icon) forces a fresh read.
 - **Bar Widget Integration**:
   - Cloud icon (`󰅟`) in the desktop bar, matching the Network / Bluetooth / Audio widgets.
   - Switches to an active sync glyph (`󰑮`) with a pulsing corner **LED** whenever a data transfer (`sync` / `bisync` / `copy` / `move` / `check`) is running — a persistent `rclone mount` does **not** trip it.

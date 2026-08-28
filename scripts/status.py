@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 
 # Operations that actually move file data and belong on the Overview
@@ -180,7 +181,30 @@ def get_running_processes():
         })
     return processes
 
-def get_configured_remotes():
+def _quota_cache_path():
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    return os.path.join(base, f"rclone-panel-quota-{os.getuid()}.json")
+
+def quota_ttl_seconds(default=900):
+    """Seconds a cached `rclone about` result stays valid. 0 forces a refresh
+    (the Refresh button passes --quota-ttl 0)."""
+    argv = sys.argv
+    for i, arg in enumerate(argv):
+        if arg == "--quota-ttl" and i + 1 < len(argv):
+            try:
+                v = int(argv[i + 1])
+                return v if v >= 0 else default
+            except ValueError:
+                return default
+    env = os.environ.get("RCLONE_PANEL_QUOTA_TTL")
+    if env:
+        try:
+            return max(0, int(env))
+        except ValueError:
+            pass
+    return default
+
+def get_configured_remotes(quota_ttl=900):
     remotes = []
     if not shutil.which("rclone"):
         return remotes
@@ -188,6 +212,21 @@ def get_configured_remotes():
     out = safe_run(["rclone", "listremotes", "--long"], timeout=4)
     if not out:
         return remotes
+
+    # `rclone about` is a provider API call, so its result is cached per remote
+    # in the runtime dir and only refreshed once quota_ttl has elapsed. Removed
+    # remotes drop out because only names still in `listremotes` are rewritten.
+    now = time.time()
+    cache_path = _quota_cache_path()
+    quota_cache = {}
+    try:
+        with open(cache_path, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+            if isinstance(loaded, dict):
+                quota_cache = loaded
+    except (OSError, ValueError):
+        quota_cache = {}
+    new_quota_cache = {}
 
     for line in out.splitlines():
         line = line.strip()
@@ -225,13 +264,24 @@ def get_configured_remotes():
             icon = "󰖟"
             provider_name = "WebDAV"
 
-        about_data = None
-        about_out = safe_run(["rclone", "about", f"{name}:", "--json"], timeout=4)
-        if about_out:
-            try:
-                about_data = json.loads(about_out)
-            except Exception:
-                about_data = None
+        cached = quota_cache.get(name)
+        is_fresh = (
+            quota_ttl > 0
+            and isinstance(cached, dict)
+            and (now - float(cached.get("t", 0))) < quota_ttl
+        )
+        if is_fresh:
+            about_data = cached.get("data")
+            new_quota_cache[name] = cached
+        else:
+            about_data = None
+            about_out = safe_run(["rclone", "about", f"{name}:", "--json"], timeout=4)
+            if about_out:
+                try:
+                    about_data = json.loads(about_out)
+                except Exception:
+                    about_data = None
+            new_quota_cache[name] = {"t": now, "data": about_data}
 
         total_bytes = about_data.get("total") if about_data else None
         used_bytes = about_data.get("used") if about_data else None
@@ -258,6 +308,15 @@ def get_configured_remotes():
             "trash_formatted": parse_size(trash_bytes) if trash_bytes else "0 B",
             "used_percent": used_percent
         })
+
+    try:
+        tmp = f"{cache_path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(new_quota_cache, fh)
+        os.replace(tmp, cache_path)
+    except OSError:
+        pass
+
     return remotes
 
 def get_fuse_mounts():
@@ -542,7 +601,7 @@ def get_sync_history():
 def main():
     has_rclone = shutil.which("rclone") is not None
     processes = compute_speeds(get_running_processes())
-    remotes = get_configured_remotes()
+    remotes = get_configured_remotes(quota_ttl_seconds())
     mounts = get_fuse_mounts()
     timers = get_scheduled_timers()
     history = get_sync_history()

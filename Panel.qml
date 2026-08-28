@@ -13,6 +13,9 @@ Panel {
   readonly property string pluginPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/susamn.rclone"
   readonly property int closedIntervalMs: Math.max(2000, Number(setting("pollIntervalClosedSec", 10)) * 1000)
   readonly property int openIntervalMs: Math.max(1000, Number(setting("pollIntervalOpenSec", 2)) * 1000)
+  // Remote quota (`rclone about`) hits the provider API, so it is cached
+  // between polls. Manual Refresh forces a fresh read.
+  readonly property int quotaTtlSec: Math.max(60, Number(setting("quotaRefreshMinutes", 15)) * 60)
 
   property var status: Model.emptyStatus()
   readonly property bool isSyncRunning: Boolean(status && status.is_sync_running)
@@ -26,9 +29,10 @@ Panel {
     actionRefreshTimer.restart()
   }
 
-  function refreshStatus() {
+  function refreshStatus(forceQuota) {
     if (statusProc.running) return
-    statusProc.command = ["bash", root.pluginPath + "/scripts/status.sh"]
+    var ttl = forceQuota === true ? 0 : root.quotaTtlSec
+    statusProc.command = ["bash", root.pluginPath + "/scripts/status.sh", "--quota-ttl", String(ttl)]
     statusProc.running = true
   }
 
@@ -80,7 +84,7 @@ Panel {
     active: root.isSyncRunning
 
     onPressed: function(b) {
-      if (b === Qt.MiddleButton) root.refreshStatus()
+      if (b === Qt.MiddleButton) root.refreshStatus(true)
       else root.toggle()
     }
 
@@ -131,7 +135,7 @@ Panel {
       status: root.status
       popupOpen: root.opened
       onRunAction: function(cmd, arg1, arg2) { root.runAction(cmd, arg1, arg2) }
-      onRefreshRequested: root.refreshStatus()
+      onRefreshRequested: root.refreshStatus(true)
       onCloseRequested: root.close()
     }
   }

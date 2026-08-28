@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "susamn.rclone",
   "name": "Rclone Sync & Monitor",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "author": "susamn",
   "license": "MIT",
   "description": "Universal Rclone visualizer: active sync processes, timers & 24h schedule timeline, remote storage gauges, and FUSE mounts.",
@@ -20,9 +20,20 @@
     "defaultSection": "right",
     "defaults": {
       "pollIntervalClosedSec": 10,
-      "pollIntervalOpenSec": 2
+      "pollIntervalOpenSec": 2,
+      "quotaRefreshMinutes": 15
     },
     "schema": [
+      {
+        "key": "quotaRefreshMinutes",
+        "type": "integer",
+        "label": "Storage quota refresh (minutes)",
+        "min": 1,
+        "max": 240,
+        "step": 1,
+        "defaultValue": 15,
+        "description": "How often `rclone about` is called per remote to refresh storage quota. This hits the provider API, so it is cached between status polls; the Refresh button always forces a fresh read."
+      },
       {
         "key": "pollIntervalClosedSec",
         "type": "integer",
