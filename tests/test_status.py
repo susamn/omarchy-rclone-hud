@@ -17,6 +17,42 @@ class TestStatusScript(unittest.TestCase):
         self.assertEqual(status.parse_size(None), "N/A")
         self.assertEqual(status.parse_size("invalid"), "N/A")
 
+    def test_compute_speeds_delta(self):
+        orig_io, orig_time = status.read_proc_io, status.time.time
+        cur = {"v": None}
+        try:
+            status.read_proc_io = lambda pid: cur["v"][0]
+            status.time.time = lambda: cur["v"][1]
+            try:
+                os.remove(status._io_state_path())
+            except OSError:
+                pass
+            # first poll: no prior sample -> speed unknown
+            cur["v"] = ({"rchar": 0, "wchar": 0}, 100.0)
+            procs = status.compute_speeds([{"pid": 424242}])
+            self.assertEqual(procs[0]["speed_bps"], 0)
+            self.assertEqual(procs[0]["speed_formatted"], "—")
+            # second poll: +8000 bytes over 2s, halved for read+write => 2000 B/s
+            cur["v"] = ({"rchar": 4000, "wchar": 4000}, 102.0)
+            procs = status.compute_speeds([{"pid": 424242}])
+            self.assertEqual(procs[0]["speed_bps"], 2000)
+            self.assertTrue(procs[0]["speed_formatted"].endswith("/s"))
+        finally:
+            status.read_proc_io, status.time.time = orig_io, orig_time
+            try:
+                os.remove(status._io_state_path())
+            except OSError:
+                pass
+
+    def test_compute_speeds_no_io(self):
+        orig_io = status.read_proc_io
+        try:
+            status.read_proc_io = lambda pid: None
+            procs = status.compute_speeds([{"pid": 1}])
+            self.assertEqual(procs[0]["speed_bps"], 0)
+        finally:
+            status.read_proc_io = orig_io
+
     def test_sanitize_usec(self):
         self.assertEqual(status.sanitize_usec(0), 0)
         self.assertEqual(status.sanitize_usec(None), 0)

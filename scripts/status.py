@@ -33,6 +33,76 @@ def parse_size(bytes_val):
         val /= 1024.0
     return f"{val:.1f} PB"
 
+def _io_state_path():
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    return os.path.join(base, f"rclone-panel-io-{os.getuid()}.json")
+
+def read_proc_io(pid):
+    """Cumulative syscall byte counters for a pid, or None if unreadable
+    (process gone, or owned by another user / more privileged)."""
+    try:
+        data = {}
+        with open(f"/proc/{int(pid)}/io", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if ":" in line:
+                    key, val = line.split(":", 1)
+                    data[key.strip()] = int(val.strip())
+        return data
+    except (OSError, ValueError):
+        return None
+
+def compute_speeds(processes):
+    """Annotate each process with speed_bps / speed_formatted from the delta of
+    rchar+wchar in /proc/<pid>/io between polls. A network transfer moves each
+    byte through one read syscall and one write syscall, so half the summed
+    delta approximates wire throughput. Previous samples live in a per-uid file
+    in the runtime dir; dead pids fall out because only live pids are rewritten.
+    """
+    now = time.time()
+    path = _io_state_path()
+
+    prev = {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+            if isinstance(loaded, dict):
+                prev = loaded
+    except (OSError, ValueError):
+        prev = {}
+
+    new_state = {}
+    for proc in processes:
+        proc["speed_bps"] = 0
+        proc["speed_formatted"] = "—"
+
+        io = read_proc_io(proc.get("pid"))
+        if not io:
+            continue
+
+        total = io.get("rchar", 0) + io.get("wchar", 0)
+        key = str(proc.get("pid"))
+        new_state[key] = {"t": now, "bytes": total}
+
+        old = prev.get(key)
+        if not old:
+            continue
+        dt = now - float(old.get("t", now))
+        db = total - int(old.get("bytes", total))
+        if dt > 0 and db > 0:
+            bps = (db / dt) / 2.0
+            proc["speed_bps"] = int(bps)
+            proc["speed_formatted"] = parse_size(bps) + "/s"
+
+    try:
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(new_state, fh)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+    return processes
+
 def get_running_processes():
     processes = []
     ps_out = safe_run(["ps", "-eo", "pid,user,etime,%cpu,%mem,args", "--sort=-etime"], timeout=3)
@@ -465,7 +535,7 @@ def get_sync_history():
 
 def main():
     has_rclone = shutil.which("rclone") is not None
-    processes = get_running_processes()
+    processes = compute_speeds(get_running_processes())
     remotes = get_configured_remotes()
     mounts = get_fuse_mounts()
     timers = get_scheduled_timers()
@@ -483,6 +553,7 @@ def main():
         "installed": has_rclone,
         "is_sync_running": is_sync_running,
         "active_processes_count": len(processes),
+        "total_speed_bps": sum(int(p.get("speed_bps", 0)) for p in processes),
         "processes": processes,
         "remotes_count": len(remotes),
         "remotes": remotes,

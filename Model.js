@@ -15,6 +15,7 @@ function emptyStatus() {
     installed: false,
     is_sync_running: false,
     active_processes_count: 0,
+    total_speed_bps: 0,
     processes: [],
     remotes_count: 0,
     remotes: [],
@@ -72,6 +73,24 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val))
 }
 
+function formatBytes(bytes) {
+  var v = Number(bytes)
+  if (!isFinite(v) || v < 0) return "0 B"
+  var units = ["B", "KB", "MB", "GB", "TB"]
+  var i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return (i === 0 ? Math.round(v) : Math.round(v * 10) / 10) + " " + units[i]
+}
+
+// Per-second throughput label, e.g. "4.2 MB/s". Used for the speed-graph
+// peak readout; per-process figures are formatted by status.py.
+function formatRate(bytesPerSec) {
+  return formatBytes(bytesPerSec) + "/s"
+}
+
 function calculateTimelineX(hourFloat, totalWidth) {
   if (hourFloat === undefined || hourFloat === null || hourFloat < 0) return -1
   var clamped = clamp(Number(hourFloat), 0, 24)
@@ -86,6 +105,8 @@ if (typeof module !== "undefined" && module.exports) {
     operationIcon: operationIcon,
     formatPercent: formatPercent,
     clamp: clamp,
-    calculateTimelineX: calculateTimelineX
+    calculateTimelineX: calculateTimelineX,
+    formatBytes: formatBytes,
+    formatRate: formatRate
   }
 }
