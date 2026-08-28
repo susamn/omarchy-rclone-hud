@@ -16,7 +16,7 @@ Real-time monitoring of active sync processes, systemd & cron timers with a 24-h
   - Switches to an active sync glyph (`󰑮`) whenever an rclone transfer is running.
   - Tooltip showing the active job count or the next scheduled sync countdown.
 - **Popup Dashboard** — same layout grammar as the MPD and Home Assistant panels: a compact header, text tabs, and thin-bordered cards on the panel fill.
-  - **Overview**: active transfer cards, next-timer countdown with a **Sync now** button, and per-remote storage bars.
+  - **Overview**: a live speed graph with one overlaid line per running transfer (throughput sampled from `/proc/<pid>/io`), active transfer cards, next-timer countdown with a **Sync now** button, and per-remote storage bars.
   - **Schedules**: discovered systemd (system + user) and cron timers, plus a 24-hour timeline ruler.
   - **Remotes**: configured remote cards with capacity bars (used / free / total / trash).
   - **Mounts**: active FUSE mounts with **Open folder** and **Unmount** actions.

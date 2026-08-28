@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -50,6 +51,56 @@ Column {
   readonly property bool installed: Boolean(status && status.installed)
   readonly property bool syncing: Boolean(status && status.is_sync_running)
 
+  // ---- Transfer speed history -------------------------------------------
+  // status.py reports an instantaneous speed_bps per process each poll; we
+  // keep a short rolling series per pid and overlay one line per transfer.
+  readonly property int speedCapacity: 40
+  property var speedSeries: ({})   // pid -> [bps, ...]
+  property real speedPeak: 1
+
+  function updateSpeedSeries() {
+    var procs = (status && status.processes) ? status.processes : []
+    var next = ({})
+    var peak = 1
+    for (var i = 0; i < procs.length; i++) {
+      var key = String(procs[i].pid)
+      var arr = speedSeries[key] ? speedSeries[key].slice() : []
+      arr.push(Math.max(0, Number(procs[i].speed_bps) || 0))
+      while (arr.length > speedCapacity)
+        arr.shift()
+      next[key] = arr
+      for (var j = 0; j < arr.length; j++)
+        if (arr[j] > peak) peak = arr[j]
+    }
+    speedSeries = next
+    speedPeak = peak
+  }
+
+  // Distinct, theme-derived stroke per transfer. Hue-rotate the accent;
+  // fall back to a lightness ramp when the accent is near-greyscale.
+  function seriesColor(idx) {
+    var a = Color.accent
+    if (a.hslSaturation < 0.15) {
+      var ls = [0.80, 0.60, 0.95, 0.45, 0.70, 0.52]
+      return Qt.hsla(0, 0, ls[idx % ls.length], 1)
+    }
+    var shift = [0, 0.12, -0.12, 0.24, -0.24, 0.36]
+    var h = (a.hslHue + shift[idx % shift.length]) % 1.0
+    if (h < 0) h += 1.0
+    return Qt.hsla(h, Math.max(0.4, a.hslSaturation), Math.max(0.55, a.hslLightness), 1)
+  }
+
+  readonly property var speedGraphSeries: {
+    var procs = (status && status.processes) ? status.processes : []
+    var out = []
+    for (var i = 0; i < procs.length; i++)
+      out.push({ points: speedSeries[String(procs[i].pid)] || [], color: seriesColor(i) })
+    return out
+  }
+
+  onStatusChanged: updateSpeedSeries()
+  onPopupOpenChanged: if (popupOpen) { speedSeries = ({}); speedPeak = 1 }
+
   // A thin-bordered card sitting on the panel fill. Self-contained so it
   // stays valid as an inline component; callers set size and children.
   component Card: BorderSurface {
@@ -83,6 +134,67 @@ Column {
     font.pixelSize: Style.font.caption
     elide: Text.ElideRight
     width: parent ? parent.width : 0
+  }
+
+  // Small overlaid line chart: one polyline per transfer, shared Y scale so
+  // the transfers compare directly. `series` is [{ points:[bps..], color }].
+  component SpeedGraph: Item {
+    id: graph
+    property var series: []
+    property real peak: 1
+    property int capacity: 40
+    implicitHeight: Style.space(44)
+
+    Rectangle {   // baseline
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      height: 1
+      color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
+    }
+
+    Rectangle {   // midline
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      height: 1
+      color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.05)
+    }
+
+    Shape {
+      anchors.fill: parent
+      preferredRendererType: Shape.CurveRenderer
+
+      Repeater {
+        model: graph.series
+        ShapePath {
+          required property var modelData
+          strokeColor: modelData.color
+          strokeWidth: 1.5
+          fillColor: "transparent"
+          capStyle: ShapePath.RoundCap
+          joinStyle: ShapePath.RoundJoin
+          PathPolyline {
+            path: {
+              var pts = modelData.points || []
+              var n = pts.length
+              if (n < 2) return []
+              var w = graph.width
+              var h = graph.height
+              var denom = Math.max(1, graph.capacity - 1)
+              var scale = graph.peak > 0 ? graph.peak : 1
+              var out = []
+              for (var i = 0; i < n; i++) {
+                var x = w - (n - 1 - i) / denom * w
+                var frac = Math.max(0, Math.min(1, pts[i] / scale))
+                out.push(Qt.point(x, h - 1.5 - frac * (h - 3)))
+              }
+              return out
+            }
+          }
+        }
+      }
+    }
   }
 
   // =========================================================================
@@ -235,30 +347,69 @@ Column {
             anchors.margins: Style.space(10)
             spacing: Style.space(6)
 
-            Text {
-              text: "Active transfers"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
+            Item {
+              width: parent.width
+              height: transfersLabel.implicitHeight
+              Text {
+                id: transfersLabel
+                anchors.left: parent.left
+                text: "Active transfers"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+              Text {
+                anchors.right: parent.right
+                anchors.baseline: transfersLabel.baseline
+                text: "peak " + Model.formatRate(root.speedPeak)
+                color: root.muted
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            SpeedGraph {
+              width: parent.width
+              series: root.speedGraphSeries
+              peak: root.speedPeak
+              capacity: root.speedCapacity
             }
 
             Repeater {
               model: root.processes
-              delegate: Column {
+              delegate: Row {
                 required property var modelData
+                required property int index
                 width: parent.width
-                spacing: Style.space(1)
-                Text {
-                  width: parent.width
-                  text: Model.operationIcon(modelData.operation) + "  " + modelData.command_preview
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideMiddle
+                spacing: Style.space(8)
+
+                Rectangle {
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(3)
+                  width: Style.space(7)
+                  height: Style.space(7)
+                  radius: width / 2
+                  color: root.seriesColor(index)
                 }
-                MetaLine {
-                  text: "pid " + modelData.pid + " · " + modelData.elapsed + " · cpu " + modelData.cpu + "% · mem " + modelData.memory + "%"
+
+                Column {
+                  width: parent.width - parent.spacing - Style.space(7)
+                  spacing: Style.space(1)
+                  Text {
+                    width: parent.width
+                    text: Model.operationIcon(modelData.operation) + "  " + modelData.command_preview
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideMiddle
+                  }
+                  MetaLine {
+                    text: (modelData.speed_formatted && modelData.speed_formatted !== "—"
+                            ? modelData.speed_formatted + " · " : "")
+                          + "pid " + modelData.pid + " · " + modelData.elapsed
+                          + " · cpu " + modelData.cpu + "%"
+                  }
                 }
               }
             }
