@@ -55,55 +55,29 @@ Column {
   readonly property bool installed: Boolean(status && status.installed)
   readonly property bool syncing: Boolean(status && status.is_sync_running)
 
-  // ---- Transfer speed history -------------------------------------------
-  // status.py reports an instantaneous speed_bps per process each poll; we
-  // keep a short rolling series per pid and overlay one line per transfer.
-  readonly property int speedCapacity: 40
-  property var speedSeries: ({})   // pid -> [bps, ...]
-  property real speedPeak: 1
+  // ---- Aggregate bandwidth history ------------------------------------
+  // status.py reports total_bandwidth_bps each poll (every rclone process,
+  // mounts included). We keep one short rolling series and plot a single
+  // line — total throughput rclone is pulling, not a plot per transfer.
+  readonly property int bandwidthCapacity: 48
+  property var bandwidthHistory: []
+  property real bandwidthPeak: 1
 
-  function updateSpeedSeries() {
-    var procs = root.transfers
-    var next = ({})
+  function updateBandwidthHistory() {
+    var v = Math.max(0, Number(status && status.total_bandwidth_bps) || 0)
+    var arr = bandwidthHistory.slice()
+    arr.push(v)
+    while (arr.length > bandwidthCapacity)
+      arr.shift()
     var peak = 1
-    for (var i = 0; i < procs.length; i++) {
-      var key = String(procs[i].pid)
-      var arr = speedSeries[key] ? speedSeries[key].slice() : []
-      arr.push(Math.max(0, Number(procs[i].speed_bps) || 0))
-      while (arr.length > speedCapacity)
-        arr.shift()
-      next[key] = arr
-      for (var j = 0; j < arr.length; j++)
-        if (arr[j] > peak) peak = arr[j]
-    }
-    speedSeries = next
-    speedPeak = peak
+    for (var i = 0; i < arr.length; i++)
+      if (arr[i] > peak) peak = arr[i]
+    bandwidthHistory = arr
+    bandwidthPeak = peak
   }
 
-  // Distinct, theme-derived stroke per transfer. Hue-rotate the accent;
-  // fall back to a lightness ramp when the accent is near-greyscale.
-  function seriesColor(idx) {
-    var a = Color.accent
-    if (a.hslSaturation < 0.15) {
-      var ls = [0.80, 0.60, 0.95, 0.45, 0.70, 0.52]
-      return Qt.hsla(0, 0, ls[idx % ls.length], 1)
-    }
-    var shift = [0, 0.12, -0.12, 0.24, -0.24, 0.36]
-    var h = (a.hslHue + shift[idx % shift.length]) % 1.0
-    if (h < 0) h += 1.0
-    return Qt.hsla(h, Math.max(0.4, a.hslSaturation), Math.max(0.55, a.hslLightness), 1)
-  }
-
-  readonly property var speedGraphSeries: {
-    var procs = root.transfers
-    var out = []
-    for (var i = 0; i < procs.length; i++)
-      out.push({ points: speedSeries[String(procs[i].pid)] || [], color: seriesColor(i) })
-    return out
-  }
-
-  onStatusChanged: updateSpeedSeries()
-  onPopupOpenChanged: if (popupOpen) { speedSeries = ({}); speedPeak = 1 }
+  onStatusChanged: updateBandwidthHistory()
+  onPopupOpenChanged: if (popupOpen) { bandwidthHistory = []; bandwidthPeak = 1 }
 
   // A thin-bordered card sitting on the panel fill. Self-contained so it
   // stays valid as an inline component; callers set size and children.
@@ -140,14 +114,30 @@ Column {
     width: parent ? parent.width : 0
   }
 
-  // Small overlaid line chart: one polyline per transfer, shared Y scale so
-  // the transfers compare directly. `series` is [{ points:[bps..], color }].
-  component SpeedGraph: Item {
+  // Single-line area chart of total rclone throughput. `points` is the
+  // rolling [bps, ...] buffer, newest last, right-aligned to the edge.
+  component BandwidthGraph: Item {
     id: graph
-    property var series: []
+    property var points: []
     property real peak: 1
-    property int capacity: 40
+    property int capacity: 48
     implicitHeight: Style.space(44)
+
+    readonly property var _xy: {
+      var pts = graph.points || []
+      var n = pts.length
+      var w = graph.width
+      var h = graph.height
+      var denom = Math.max(1, graph.capacity - 1)
+      var scale = graph.peak > 0 ? graph.peak : 1
+      var line = []
+      for (var i = 0; i < n; i++) {
+        var x = w - (n - 1 - i) / denom * w
+        var frac = Math.max(0, Math.min(1, pts[i] / scale))
+        line.push(Qt.point(x, h - 1.5 - frac * (h - 3)))
+      }
+      return line
+    }
 
     Rectangle {   // baseline
       anchors.left: parent.left
@@ -168,35 +158,33 @@ Column {
     Shape {
       anchors.fill: parent
       preferredRendererType: Shape.CurveRenderer
+      visible: graph._xy.length >= 2
 
-      Repeater {
-        model: graph.series
-        ShapePath {
-          required property var modelData
-          strokeColor: modelData.color
-          strokeWidth: 1.5
-          fillColor: "transparent"
-          capStyle: ShapePath.RoundCap
-          joinStyle: ShapePath.RoundJoin
-          PathPolyline {
-            path: {
-              var pts = modelData.points || []
-              var n = pts.length
-              if (n < 2) return []
-              var w = graph.width
-              var h = graph.height
-              var denom = Math.max(1, graph.capacity - 1)
-              var scale = graph.peak > 0 ? graph.peak : 1
-              var out = []
-              for (var i = 0; i < n; i++) {
-                var x = w - (n - 1 - i) / denom * w
-                var frac = Math.max(0, Math.min(1, pts[i] / scale))
-                out.push(Qt.point(x, h - 1.5 - frac * (h - 3)))
-              }
-              return out
-            }
+      // Filled area under the curve.
+      ShapePath {
+        strokeWidth: 0
+        strokeColor: "transparent"
+        fillColor: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16)
+        PathPolyline {
+          path: {
+            var line = graph._xy
+            if (line.length < 2) return []
+            var poly = line.slice()
+            poly.push(Qt.point(line[line.length - 1].x, graph.height))
+            poly.push(Qt.point(line[0].x, graph.height))
+            return poly
           }
         }
+      }
+
+      // The line itself.
+      ShapePath {
+        strokeColor: Color.accent
+        strokeWidth: 1.5
+        fillColor: "transparent"
+        capStyle: ShapePath.RoundCap
+        joinStyle: ShapePath.RoundJoin
+        PathPolyline { path: graph._xy }
       }
     }
   }
@@ -367,23 +355,23 @@ Column {
         width: parent.width
         spacing: Style.space(8)
 
-        // Running transfers (mounts live on their own tab)
+        // Total rclone bandwidth (transfers + mounts streaming files)
         Card {
-          visible: root.transfers.length > 0
-          implicitHeight: runCol.implicitHeight + Style.space(20)
+          visible: root.transfers.length > 0 || root.mounts.length > 0
+          implicitHeight: bwCol.implicitHeight + Style.space(20)
           Column {
-            id: runCol
+            id: bwCol
             anchors.fill: parent
             anchors.margins: Style.space(10)
             spacing: Style.space(6)
 
             Item {
               width: parent.width
-              height: transfersLabel.implicitHeight
+              height: bwLabel.implicitHeight
               Text {
-                id: transfersLabel
+                id: bwLabel
                 anchors.left: parent.left
-                text: "Active transfers"
+                text: "Bandwidth"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -391,55 +379,138 @@ Column {
               }
               Text {
                 anchors.right: parent.right
-                anchors.baseline: transfersLabel.baseline
-                text: "peak " + Model.formatRate(root.speedPeak)
+                anchors.baseline: bwLabel.baseline
+                text: Model.formatRate(root.status && root.status.total_bandwidth_bps ? root.status.total_bandwidth_bps : 0)
+                      + "  ·  peak " + Model.formatRate(root.bandwidthPeak)
                 color: root.muted
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }
             }
 
-            SpeedGraph {
+            BandwidthGraph {
               width: parent.width
-              series: root.speedGraphSeries
-              peak: root.speedPeak
-              capacity: root.speedCapacity
+              points: root.bandwidthHistory
+              peak: root.bandwidthPeak
+              capacity: root.bandwidthCapacity
+            }
+
+            MetaLine {
+              text: root.transfers.length + " transfer" + (root.transfers.length === 1 ? "" : "s")
+                    + "  ·  " + root.mounts.length + " mount" + (root.mounts.length === 1 ? "" : "s")
+            }
+          }
+        }
+
+        // Running transfers
+        Card {
+          visible: root.transfers.length > 0
+          implicitHeight: runCol.implicitHeight + Style.space(20)
+          Column {
+            id: runCol
+            anchors.fill: parent
+            anchors.margins: Style.space(10)
+            spacing: Style.space(8)
+
+            Text {
+              text: "Active transfers"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
             }
 
             Repeater {
               model: root.transfers
-              delegate: Row {
+              delegate: Column {
                 required property var modelData
-                required property int index
                 width: parent.width
-                spacing: Style.space(8)
+                spacing: Style.space(2)
 
-                Rectangle {
-                  anchors.top: parent.top
-                  anchors.topMargin: Style.space(3)
-                  width: Style.space(7)
-                  height: Style.space(7)
-                  radius: width / 2
-                  color: root.seriesColor(index)
-                }
-
-                Column {
-                  width: parent.width - parent.spacing - Style.space(7)
-                  spacing: Style.space(1)
+                Row {
+                  width: parent.width
+                  spacing: Style.space(6)
                   Text {
-                    width: parent.width
-                    text: Model.operationIcon(modelData.operation) + "  " + modelData.command_preview
+                    text: Model.operationIcon(modelData.operation)
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
-                    elide: Text.ElideMiddle
                   }
-                  MetaLine {
-                    text: (modelData.speed_formatted && modelData.speed_formatted !== "—"
-                            ? modelData.speed_formatted + " · " : "")
-                          + "pid " + modelData.pid + " · " + modelData.elapsed
-                          + " · cpu " + modelData.cpu + "%"
+                  Pill {
+                    anchors.verticalCenter: parent.verticalCenter
+                    label: Model.syncKindLabel(modelData.operation)
+                    labelColor: Color.accent
                   }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.speed_formatted && modelData.speed_formatted !== "—"
+                            ? modelData.speed_formatted : ""
+                    color: root.muted
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+
+                Text {
+                  width: parent.width
+                  text: (modelData.source ? modelData.source : "")
+                        + (modelData.destination ? "  →  " + modelData.destination : "")
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideMiddle
+                }
+                MetaLine {
+                  text: "pid " + modelData.pid + " · " + modelData.elapsed + " · cpu " + modelData.cpu + "%"
+                }
+              }
+            }
+          }
+        }
+
+        // Mounts present on this system (full controls on the Mounts tab)
+        Card {
+          visible: root.mounts.length > 0
+          implicitHeight: mountsMiniCol.implicitHeight + Style.space(20)
+          Column {
+            id: mountsMiniCol
+            anchors.fill: parent
+            anchors.margins: Style.space(10)
+            spacing: Style.space(6)
+
+            Text {
+              text: "Mounts (" + root.mounts.length + ")"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.currentTab = 3
+              }
+            }
+
+            Repeater {
+              model: root.mounts
+              delegate: Row {
+                required property var modelData
+                width: parent.width
+                spacing: Style.space(6)
+                Text {
+                  text: "󱂵"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                Text {
+                  width: parent.width - parent.spacing - Style.space(12)
+                  text: (modelData.source ? modelData.source : modelData.remote) + "  →  " + modelData.target
+                  color: root.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideMiddle
                 }
               }
             }
@@ -482,7 +553,8 @@ Column {
                 text: "󰉋 " + (root.nextTimer ? root.nextTimer.local_path : "") + "  →  󰅟 " + (root.nextTimer ? root.nextTimer.remote_path : "")
               }
               MetaLine {
-                text: "last run " + (root.nextTimer ? root.nextTimer.last_formatted : "n/a")
+                text: (root.nextTimer ? Model.syncKindLabel(root.nextTimer.sync_type) : "")
+                      + " · last run " + (root.nextTimer ? root.nextTimer.last_formatted : "n/a")
               }
             }
 
@@ -691,6 +763,11 @@ Column {
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
                     font.bold: true
+                  }
+                  Pill {
+                    anchors.verticalCenter: parent.verticalCenter
+                    label: Model.syncKindLabel(modelData.sync_type)
+                    labelColor: Color.accent
                   }
                   Pill {
                     anchors.verticalCenter: parent.verticalCenter
