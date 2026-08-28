@@ -6,6 +6,11 @@ import shutil
 import subprocess
 import time
 
+# Operations that actually move file data and belong on the Overview
+# "transfers" list / speed graph. A `mount` or `rcd` is a long-lived daemon,
+# not a transfer, and must not churn the transfers card on every poll.
+TRANSFER_OPS = {"sync", "bisync", "copy", "move", "check"}
+
 def safe_run(cmd, timeout=5):
     try:
         res = subprocess.run(
@@ -167,10 +172,11 @@ def get_running_processes():
             "cpu": cpu,
             "memory": mem,
             "operation": operation,
+            "is_transfer": operation in TRANSFER_OPS,
             "source": source,
             "destination": destination,
             "flags": " ".join(flags[:4]),
-            "command_preview": (operation.upper() + ": " + source + " ➔ " + destination).strip() if (source or destination) else operation.upper()
+            "command_preview": (operation.upper() + ": " + source + " → " + destination).strip() if (source or destination) else operation.upper()
         })
     return processes
 
@@ -547,13 +553,14 @@ def main():
             next_timer = t
             break
 
-    is_sync_running = len([p for p in processes if p.get("operation") in ["sync", "bisync", "copy", "move"]]) > 0
+    transfers = [p for p in processes if p.get("is_transfer")]
+    is_sync_running = len(transfers) > 0
     
     payload = {
         "installed": has_rclone,
         "is_sync_running": is_sync_running,
         "active_processes_count": len(processes),
-        "total_speed_bps": sum(int(p.get("speed_bps", 0)) for p in processes),
+        "total_speed_bps": sum(int(p.get("speed_bps", 0)) for p in transfers),
         "processes": processes,
         "remotes_count": len(remotes),
         "remotes": remotes,

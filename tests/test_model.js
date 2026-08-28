@@ -18,8 +18,21 @@ assert.strictEqual(Model.barTooltipText({ installed: false }), "Rclone: Not foun
 assert.strictEqual(Model.barTooltipText({
   installed: true,
   is_sync_running: true,
-  processes: [{ operation: "sync" }]
-}), "Rclone: 1 active sync job running")
+  processes: [{ operation: "sync", is_transfer: true }]
+}), "Rclone: 1 transfer running")
+assert.strictEqual(Model.barTooltipText({
+  installed: true,
+  is_sync_running: true,
+  total_speed_bps: 4404019,
+  processes: [{ operation: "sync", is_transfer: true }, { operation: "copy", is_transfer: true }]
+}), "Rclone: 2 transfers running · 4.2 MB/s")
+// A lone mount is not a transfer and must not read as "running".
+assert.strictEqual(Model.barTooltipText({
+  installed: true,
+  is_sync_running: false,
+  remotes_count: 2,
+  processes: [{ operation: "mount", is_transfer: false }]
+}), "Rclone: 2 remotes configured")
 assert.strictEqual(Model.barTooltipText({
   installed: true,
   is_sync_running: false,

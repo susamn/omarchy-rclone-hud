@@ -36,9 +36,13 @@ function barTooltipText(status) {
   if (status.is_sync_running) {
     var procs = (status.processes && status.processes.length) ? status.processes : []
     var count = procs.filter(function(p) {
-      return p.operation === "sync" || p.operation === "bisync" || p.operation === "copy" || p.operation === "move"
+      return p.is_transfer === true
+        || p.operation === "sync" || p.operation === "bisync"
+        || p.operation === "copy" || p.operation === "move"
     }).length
-    return "Rclone: " + count + " active sync job" + (count > 1 ? "s" : "") + " running"
+    var label = "Rclone: " + count + " transfer" + (count === 1 ? "" : "s") + " running"
+    var rate = Number(status.total_speed_bps) || 0
+    return rate > 0 ? label + " · " + formatRate(rate) : label
   }
   if (status.next_timer && status.next_timer.next_formatted) {
     var prof = status.next_timer.profile || "job"
