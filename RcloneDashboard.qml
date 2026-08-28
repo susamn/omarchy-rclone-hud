@@ -31,7 +31,7 @@ Column {
       (arg2 === undefined || arg2 === null) ? "" : String(arg2))
   }
 
-  // 0 Overview · 1 Schedules · 2 Remotes · 3 Mounts · 4 History
+  // 0 Overview · 1 Schedules · 2 Storages · 3 Mounts · 4 History
   property int currentTab: 0
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -265,7 +265,7 @@ Column {
         text: !root.installed ? "Not found on PATH"
               : root.syncing ? Model.barTooltipText(root.status).replace("Rclone: ", "")
               : root.nextTimer && root.nextTimer.next_formatted ? "Next " + root.nextTimer.profile + " " + root.nextTimer.next_formatted
-              : root.remotes.length + " remote" + (root.remotes.length === 1 ? "" : "s") + " · " + root.mounts.length + " mount" + (root.mounts.length === 1 ? "" : "s")
+              : root.remotes.length + " storage" + (root.remotes.length === 1 ? "" : "s") + " · " + root.mounts.length + " mount" + (root.mounts.length === 1 ? "" : "s")
         color: root.muted
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -308,7 +308,7 @@ Column {
     spacing: Style.space(4)
 
     Repeater {
-      model: ["Overview", "Schedules", "Remotes", "Mounts", "History"]
+      model: ["Overview", "Schedules", "Storages", "Mounts", "History"]
       delegate: Button {
         required property int index
         required property string modelData
@@ -529,77 +529,6 @@ Column {
           }
         }
 
-        Text {
-          visible: root.remotes.length > 0
-          text: "Storage"
-          color: root.muted
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          font.bold: true
-        }
-
-        Repeater {
-          model: root.remotes
-          delegate: Card {
-            required property var modelData
-            implicitHeight: quotaCol.implicitHeight + Style.space(20)
-            Column {
-              id: quotaCol
-              anchors.fill: parent
-              anchors.margins: Style.space(10)
-              spacing: Style.space(6)
-
-              Row {
-                width: parent.width
-                spacing: Style.space(6)
-                Text {
-                  text: modelData.icon
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                }
-                Text {
-                  width: parent.width - parent.spacing * 2 - pctText.width - 20
-                  text: modelData.name + "  ·  " + modelData.provider
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
-                  elide: Text.ElideRight
-                }
-                Text {
-                  id: pctText
-                  visible: modelData.has_quota
-                  text: Model.formatPercent(modelData.used_percent) + "%"
-                  color: Color.accent
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                }
-              }
-
-              Rectangle {
-                visible: modelData.has_quota
-                width: parent.width
-                height: Style.space(4)
-                radius: height / 2
-                color: root.track
-                Rectangle {
-                  width: parent.width * (Model.formatPercent(modelData.used_percent) / 100)
-                  height: parent.height
-                  radius: height / 2
-                  color: Color.accent
-                }
-              }
-
-              MetaLine {
-                text: modelData.has_quota
-                  ? "used " + modelData.used_formatted + " · free " + modelData.free_formatted + " · total " + modelData.total_formatted
-                  : "quota not reported by this remote"
-              }
-            }
-          }
-        }
       }
     }
 
@@ -765,7 +694,7 @@ Column {
       }
     }
 
-    // ------------------------------------------------------------- Remotes
+    // ------------------------------------------------------------- Storages
     Flickable {
       anchors.fill: parent
       visible: root.installed && root.currentTab === 2
@@ -780,7 +709,7 @@ Column {
 
         Text {
           visible: root.remotes.length === 0
-          text: "No remotes configured (rclone config)."
+          text: "No storage remotes configured (rclone config)."
           color: root.muted
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
@@ -843,7 +772,7 @@ Column {
               }
               MetaLine {
                 visible: !modelData.has_quota
-                text: "quota not reported by this remote"
+                text: "quota not reported by this storage"
               }
             }
           }
