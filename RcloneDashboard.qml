@@ -1,19 +1,23 @@
 import QtQuick
-import QtQuick.Layouts
-import Quickshell
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-Item {
+// Rclone popup dashboard shown inside the bar widget's KeyboardPanel.
+// Same visual grammar as the Network / MPD / Home Assistant panels:
+// a compact header, a row of text tabs, a hairline separator, and a
+// fixed-height content area of thin-bordered cards on the panel fill.
+Column {
   id: root
+  spacing: Style.space(10)
 
-  property var bar: null
+  property QtObject bar: null
   property string pluginPath: ""
   property var status: Model.emptyStatus()
   property bool popupOpen: false
 
   signal runAction(string cmd, string arg1, string arg2)
+  signal refreshRequested()
   signal closeRequested()
 
   // QML signal emission is strict about arity: emitting runAction() with
@@ -26,7 +30,16 @@ Item {
       (arg2 === undefined || arg2 === null) ? "" : String(arg2))
   }
 
-  property int currentTab: 0 // 0: Overview, 1: Schedules, 2: Remotes, 3: Mounts, 4: History
+  // 0 Overview · 1 Schedules · 2 Remotes · 3 Mounts · 4 History
+  property int currentTab: 0
+
+  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property color muted: Qt.darker(foreground, 1.4)
+  readonly property color faint: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.10)
+  readonly property color track: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
+  readonly property color cardFill: Style.normalFillFor(foreground, Color.accent)
+  readonly property var cardBorder: Border.flat(faint, 1)
 
   readonly property var processes: (status && status.processes) ? status.processes : []
   readonly property var remotes: (status && status.remotes) ? status.remotes : []
@@ -34,1068 +47,738 @@ Item {
   readonly property var timers: (status && status.timers) ? status.timers : []
   readonly property var history: (status && status.history) ? status.history : []
   readonly property var nextTimer: (status && status.next_timer) ? status.next_timer : null
+  readonly property bool installed: Boolean(status && status.installed)
+  readonly property bool syncing: Boolean(status && status.is_sync_running)
 
-  readonly property color fg: Color.menu.text
-  readonly property color bg: Color.menu.background
-  readonly property color borderCol: Color.menu.border
-  readonly property color accentCol: Color.accent
-  readonly property color mutedCol: Color.muted
-  readonly property color brightCol: Util.alpha(Color.foreground, 0.08)
+  // A thin-bordered card sitting on the panel fill. Self-contained so it
+  // stays valid as an inline component; callers set size and children.
+  component Card: BorderSurface {
+    width: parent ? parent.width : 0
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(Color.foreground, Color.accent)
+    borderSpec: Border.flat(Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10), 1)
+  }
 
-  implicitWidth: Style.space(700)
-  implicitHeight: contentColumn.implicitHeight + Style.space(24)
+  component Pill: BorderSurface {
+    property string label: ""
+    property color labelColor: Qt.darker(Color.foreground, 1.4)
+    implicitWidth: pillText.implicitWidth + Style.space(12)
+    implicitHeight: Style.space(16)
+    radius: Style.cornerRadius
+    color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
+    borderSpec: Border.none()
+    Text {
+      id: pillText
+      anchors.centerIn: parent
+      text: parent.label
+      color: parent.labelColor
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+  }
 
-  ColumnLayout {
-    id: contentColumn
-    anchors.fill: parent
-    anchors.margins: Style.space(14)
-    spacing: Style.space(12)
+  component MetaLine: Text {
+    color: Qt.darker(Color.foreground, 1.4)
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+    elide: Text.ElideRight
+    width: parent ? parent.width : 0
+  }
 
-    // ------------------------------------------------------------- Header
-    RowLayout {
-      Layout.fillWidth: true
-      spacing: Style.space(10)
+  // =========================================================================
+  // 1. Header
+  // =========================================================================
+  Item {
+    id: header
+    width: parent.width
+    height: Math.max(iconBox.height, titleCol.implicitHeight)
 
-      Rectangle {
-        width: Style.space(32)
-        height: Style.space(32)
-        radius: Style.cornerRadius
-        color: status && status.is_sync_running ? root.accentCol : root.brightCol
+    BorderSurface {
+      id: iconBox
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(34)
+      height: Style.space(34)
+      radius: Style.cornerRadius
+      color: root.syncing ? Style.selectedFillFor(root.foreground, Color.accent)
+                          : Style.normalFillFor(root.foreground, Color.accent)
+      borderSpec: root.cardBorder
 
-        Text {
-          anchors.centerIn: parent
-          text: status && status.is_sync_running ? "󰑮" : "󰜱"
-          font.family: Style.font.family
-          font.pixelSize: Style.font.heading
-          color: status && status.is_sync_running ? Color.background : root.fg
-        }
-      }
-
-      ColumnLayout {
-        Layout.fillWidth: true
-        spacing: Style.space(2)
-
-        Text {
-          text: "Rclone Cloud & Sync"
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          font.weight: Font.DemiBold
-          color: root.fg
-        }
-
-        RowLayout {
-          spacing: Style.space(6)
-
-          // Running badge
-          Rectangle {
-            visible: Boolean(status && status.is_sync_running)
-            height: Style.space(18)
-            width: runningText.implicitWidth + Style.space(12)
-            radius: Style.space(9)
-            color: root.accentCol
-
-            Text {
-              id: runningText
-              anchors.centerIn: parent
-              text: "● Syncing"
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.weight: Font.Bold
-              color: Color.background
-            }
-          }
-
-          // Next Run Badge
-          Rectangle {
-            visible: Boolean(nextTimer && nextTimer.next_formatted)
-            height: Style.space(18)
-            width: nextText.implicitWidth + Style.space(12)
-            radius: Style.space(9)
-            color: root.brightCol
-
-            Text {
-              id: nextText
-              anchors.centerIn: parent
-              text: "Next: " + (nextTimer ? nextTimer.next_formatted : "")
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              color: root.mutedCol
-            }
-          }
-
-          // Remotes Badge
-          Rectangle {
-            height: Style.space(18)
-            width: remotesBadgeText.implicitWidth + Style.space(12)
-            radius: Style.space(9)
-            color: root.brightCol
-
-            Text {
-              id: remotesBadgeText
-              anchors.centerIn: parent
-              text: (remotes.length) + " Remote" + (remotes.length === 1 ? "" : "s")
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              color: root.mutedCol
-            }
-          }
-        }
-      }
-
-      // Refresh Button
-      Rectangle {
-        width: Style.space(28)
-        height: Style.space(28)
-        radius: Style.cornerRadius
-        color: refreshMouse.containsMouse ? root.brightCol : "transparent"
-        border.width: 1
-        border.color: root.borderCol
-
-        Text {
-          anchors.centerIn: parent
-          text: "󰑐"
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          color: root.fg
-        }
-
-        MouseArea {
-          id: refreshMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.doAction("refresh")
-        }
-      }
-
-      // Close Button
-      Rectangle {
-        width: Style.space(28)
-        height: Style.space(28)
-        radius: Style.cornerRadius
-        color: closeMouse.containsMouse ? root.brightCol : "transparent"
-        border.width: 1
-        border.color: root.borderCol
-
-        Text {
-          anchors.centerIn: parent
-          text: "󰅖"
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          color: root.fg
-        }
-
-        MouseArea {
-          id: closeMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.closeRequested()
-        }
+      Text {
+        anchors.centerIn: parent
+        text: root.syncing ? "󰑮" : "󰅟"
+        color: root.syncing ? Color.accent : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.icon
       }
     }
 
-    // ------------------------------------------------------------- Tab Bar
-    RowLayout {
-      Layout.fillWidth: true
-      spacing: Style.space(6)
+    Column {
+      id: titleCol
+      anchors.left: iconBox.right
+      anchors.leftMargin: Style.space(10)
+      anchors.right: headerActions.left
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
 
-      Repeater {
-        model: [
-          { name: "Overview", icon: "󰄬" },
-          { name: "Schedules", icon: "󱡶" },
-          { name: "Remotes", icon: "󰅟" },
-          { name: "Mounts", icon: "󰉍" },
-          { name: "History", icon: "󰋚" }
-        ]
+      Text {
+        text: "Rclone"
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+      }
 
-        delegate: Rectangle {
-          id: tabBtn
-          readonly property bool isSelected: root.currentTab === index
-          Layout.fillWidth: true
-          height: Style.space(30)
-          radius: Style.cornerRadius
-          color: isSelected ? root.accentCol : (tabArea.containsMouse ? root.brightCol : root.bg)
-          border.width: 1
-          border.color: isSelected ? root.accentCol : root.borderCol
+      Text {
+        width: parent.width
+        text: !root.installed ? "Not found on PATH"
+              : root.syncing ? Model.barTooltipText(root.status).replace("Rclone: ", "")
+              : root.nextTimer && root.nextTimer.next_formatted ? "Next " + root.nextTimer.profile + " " + root.nextTimer.next_formatted
+              : root.remotes.length + " remote" + (root.remotes.length === 1 ? "" : "s") + " · " + root.mounts.length + " mount" + (root.mounts.length === 1 ? "" : "s")
+        color: root.muted
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
+    }
 
-          RowLayout {
-            anchors.centerIn: parent
+    Row {
+      id: headerActions
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(4)
+
+      Button {
+        iconText: "󰑐"
+        iconSize: Style.font.body
+        foreground: root.foreground
+        horizontalPadding: Style.space(7)
+        verticalPadding: Style.space(5)
+        tooltipText: "Refresh"
+        onClicked: root.refreshRequested()
+      }
+      Button {
+        iconText: "󰅖"
+        iconSize: Style.font.body
+        foreground: root.foreground
+        horizontalPadding: Style.space(7)
+        verticalPadding: Style.space(5)
+        tooltipText: "Close"
+        onClicked: root.closeRequested()
+      }
+    }
+  }
+
+  // =========================================================================
+  // 2. Tabs
+  // =========================================================================
+  Row {
+    width: parent.width
+    spacing: Style.space(4)
+
+    Repeater {
+      model: ["Overview", "Schedules", "Remotes", "Mounts", "History"]
+      delegate: Button {
+        required property int index
+        required property string modelData
+        text: modelData
+        fontSize: Style.font.caption
+        foreground: root.foreground
+        bordered: true
+        selected: root.currentTab === index
+        horizontalPadding: Style.space(7)
+        verticalPadding: Style.space(3)
+        onClicked: root.currentTab = index
+      }
+    }
+  }
+
+  PanelSeparator { foreground: root.foreground }
+
+  // =========================================================================
+  // 3. Content
+  // =========================================================================
+  Item {
+    width: parent.width
+    height: Style.space(300)
+
+    Text {
+      anchors.centerIn: parent
+      visible: !root.installed
+      text: "Install rclone to use this panel."
+      color: root.muted
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    // ------------------------------------------------------------- Overview
+    Flickable {
+      anchors.fill: parent
+      visible: root.installed && root.currentTab === 0
+      contentHeight: overviewCol.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+
+      Column {
+        id: overviewCol
+        width: parent.width
+        spacing: Style.space(8)
+
+        // Running jobs
+        Card {
+          visible: root.processes.length > 0
+          implicitHeight: runCol.implicitHeight + Style.space(20)
+          Column {
+            id: runCol
+            anchors.fill: parent
+            anchors.margins: Style.space(10)
             spacing: Style.space(6)
 
             Text {
-              text: modelData.icon
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              color: isSelected ? Color.background : root.fg
-            }
-
-            Text {
-              text: modelData.name
-              font.family: Style.font.family
+              text: "Active transfers"
+              color: root.foreground
+              font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
-              font.weight: isSelected ? Font.DemiBold : Font.Normal
-              color: isSelected ? Color.background : root.fg
+              font.bold: true
             }
-          }
 
-          MouseArea {
-            id: tabArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.currentTab = index
+            Repeater {
+              model: root.processes
+              delegate: Column {
+                required property var modelData
+                width: parent.width
+                spacing: Style.space(1)
+                Text {
+                  width: parent.width
+                  text: Model.operationIcon(modelData.operation) + "  " + modelData.command_preview
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideMiddle
+                }
+                MetaLine {
+                  text: "pid " + modelData.pid + " · " + modelData.elapsed + " · cpu " + modelData.cpu + "% · mem " + modelData.memory + "%"
+                }
+              }
+            }
           }
         }
-      }
-    }
 
-    // ------------------------------------------------------------- Tab Views Container
-    Item {
-      Layout.fillWidth: true
-      implicitHeight: Style.space(380)
+        // Next scheduled job
+        Card {
+          visible: Boolean(root.nextTimer)
+          implicitHeight: nextCol.implicitHeight + Style.space(20)
+          Row {
+            anchors.fill: parent
+            anchors.margins: Style.space(10)
+            spacing: Style.space(10)
 
-      // =========================================================== TAB 0: OVERVIEW
-      Flickable {
-        anchors.fill: parent
-        visible: root.currentTab === 0
-        contentHeight: overviewCol.implicitHeight
-        clip: true
+            Column {
+              id: nextCol
+              width: parent.width - runNowBtn.width - parent.spacing
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
 
-        ColumnLayout {
-          id: overviewCol
-          width: parent.width
-          spacing: Style.space(12)
+              Row {
+                spacing: Style.space(6)
+                Text {
+                  text: "Next: " + (root.nextTimer ? root.nextTimer.profile : "")
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                }
+                Pill {
+                  anchors.verticalCenter: parent.verticalCenter
+                  label: root.nextTimer ? root.nextTimer.next_formatted : ""
+                  labelColor: Color.accent
+                }
+              }
 
-          // 1. Live Running Sync Card (if active)
-          Rectangle {
-            visible: Boolean(status && status.is_sync_running)
-            Layout.fillWidth: true
-            implicitHeight: liveSyncCol.implicitHeight + Style.space(16)
-            radius: Style.cornerRadius
-            color: root.bg
-            border.width: 1
-            border.color: root.accentCol
+              MetaLine {
+                visible: Boolean(root.nextTimer && root.nextTimer.local_path)
+                text: "󰉋 " + (root.nextTimer ? root.nextTimer.local_path : "") + "  →  󰅟 " + (root.nextTimer ? root.nextTimer.remote_path : "")
+              }
+              MetaLine {
+                text: "last run " + (root.nextTimer ? root.nextTimer.last_formatted : "n/a")
+              }
+            }
 
-            ColumnLayout {
-              id: liveSyncCol
+            Button {
+              id: runNowBtn
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Sync now"
+              iconText: "󰐊"
+              fontSize: Style.font.caption
+              iconSize: Style.font.caption
+              foreground: root.foreground
+              bordered: true
+              onClicked: {
+                if (root.nextTimer)
+                  root.doAction("sync", root.nextTimer.service_unit || root.nextTimer.profile)
+              }
+            }
+          }
+        }
+
+        Text {
+          visible: root.remotes.length > 0
+          text: "Storage"
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Repeater {
+          model: root.remotes
+          delegate: Card {
+            required property var modelData
+            implicitHeight: quotaCol.implicitHeight + Style.space(20)
+            Column {
+              id: quotaCol
               anchors.fill: parent
               anchors.margins: Style.space(10)
               spacing: Style.space(6)
 
-              RowLayout {
-                Layout.fillWidth: true
-                spacing: Style.space(8)
-
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
                 Text {
-                  text: "⚡ ACTIVE SYNC IN PROGRESS"
-                  font.family: Style.font.family
+                  text: modelData.icon
+                  color: root.foreground
+                  font.family: root.fontFamily
                   font.pixelSize: Style.font.bodySmall
-                  font.weight: Font.Bold
-                  color: root.accentCol
                 }
-
-                Item { Layout.fillWidth: true }
-
                 Text {
-                  text: processes.length > 0 ? ("PID " + processes[0].pid + " · " + processes[0].elapsed) : ""
-                  font.family: Style.font.family
+                  width: parent.width - parent.spacing * 2 - pctText.width - 20
+                  text: modelData.name + "  ·  " + modelData.provider
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                  elide: Text.ElideRight
+                }
+                Text {
+                  id: pctText
+                  visible: modelData.has_quota
+                  text: Model.formatPercent(modelData.used_percent) + "%"
+                  color: Color.accent
+                  font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
-                  color: root.mutedCol
+                  font.bold: true
+                }
+              }
+
+              Rectangle {
+                visible: modelData.has_quota
+                width: parent.width
+                height: Style.space(4)
+                radius: height / 2
+                color: root.track
+                Rectangle {
+                  width: parent.width * (Model.formatPercent(modelData.used_percent) / 100)
+                  height: parent.height
+                  radius: height / 2
+                  color: Color.accent
+                }
+              }
+
+              MetaLine {
+                text: modelData.has_quota
+                  ? "used " + modelData.used_formatted + " · free " + modelData.free_formatted + " · total " + modelData.total_formatted
+                  : "quota not reported by this remote"
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------- Schedules
+    Flickable {
+      anchors.fill: parent
+      visible: root.installed && root.currentTab === 1
+      contentHeight: schedCol.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+
+      Column {
+        id: schedCol
+        width: parent.width
+        spacing: Style.space(8)
+
+        // 24-hour timeline
+        Card {
+          implicitHeight: tlCol.implicitHeight + Style.space(20)
+          Column {
+            id: tlCol
+            anchors.fill: parent
+            anchors.margins: Style.space(10)
+            spacing: Style.space(6)
+
+            Text {
+              text: "Next 24 hours"
+              color: root.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Item {
+              id: ruler
+              width: parent.width
+              height: Style.space(26)
+
+              Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: Style.space(6)
+                height: 1
+                color: root.faint
+              }
+
+              Repeater {
+                model: [0, 6, 12, 18, 24]
+                delegate: Text {
+                  required property int modelData
+                  x: Math.min(ruler.width - width, Math.max(0, Model.calculateTimelineX(modelData, ruler.width) - width / 2))
+                  anchors.bottom: parent.bottom
+                  text: (modelData < 10 ? "0" : "") + modelData + ":00"
+                  color: root.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption - 1
                 }
               }
 
               Repeater {
-                model: processes
-                delegate: ColumnLayout {
-                  Layout.fillWidth: true
-                  spacing: Style.space(2)
-
-                  Text {
-                    text: modelData.command_preview
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                    font.weight: Font.DemiBold
-                    color: root.fg
-                    elide: Text.ElideMiddle
-                  }
-
-                  Text {
-                    visible: Boolean(modelData.flags)
-                    text: "Flags: " + modelData.flags
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.mutedCol
-                  }
-                }
-              }
-            }
-          }
-
-          // 2. Next Scheduled Job Card
-          Rectangle {
-            visible: Boolean(nextTimer)
-            Layout.fillWidth: true
-            implicitHeight: nextTimerCol.implicitHeight + Style.space(16)
-            radius: Style.cornerRadius
-            color: root.bg
-            border.width: 1
-            border.color: root.borderCol
-
-            RowLayout {
-              id: nextTimerCol
-              anchors.fill: parent
-              anchors.margins: Style.space(10)
-              spacing: Style.space(12)
-
-              Rectangle {
-                width: Style.space(36)
-                height: Style.space(36)
-                radius: Style.cornerRadius
-                color: root.brightCol
-
-                Text {
-                  anchors.centerIn: parent
-                  text: "⏱️"
-                  font.pixelSize: Style.font.heading
-                }
-              }
-
-              ColumnLayout {
-                Layout.fillWidth: true
-                spacing: Style.space(2)
-
-                RowLayout {
-                  spacing: Style.space(6)
-                  Text {
-                    text: "Next Scheduled Sync: " + (nextTimer ? nextTimer.profile : "")
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    font.weight: Font.DemiBold
-                    color: root.fg
-                  }
-
-                  Rectangle {
-                    height: Style.space(16)
-                    width: countdownTxt.implicitWidth + Style.space(8)
-                    radius: Style.space(8)
-                    color: root.accentCol
-
-                    Text {
-                      id: countdownTxt
-                      anchors.centerIn: parent
-                      text: nextTimer ? nextTimer.next_formatted : ""
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                      color: Color.background
-                    }
-                  }
-                }
-
-                Text {
-                  visible: Boolean(nextTimer && nextTimer.local_path)
-                  text: "📁 " + (nextTimer ? nextTimer.local_path : "") + " ➔ ☁️ " + (nextTimer ? nextTimer.remote_path : "")
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  color: root.mutedCol
-                  elide: Text.ElideMiddle
-                }
-
-                Text {
-                  text: "Service: " + (nextTimer ? nextTimer.service_unit : "") + " · Last run: " + (nextTimer ? nextTimer.last_formatted : "N/A")
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  color: root.mutedCol
-                }
-              }
-
-              // Run Now Button
-              Rectangle {
-                implicitHeight: Style.space(30)
-                implicitWidth: runTxt.implicitWidth + Style.space(20)
-                radius: Style.cornerRadius
-                color: runMouse.containsMouse ? root.accentCol : root.brightCol
-                border.width: 1
-                border.color: root.borderCol
-
-                RowLayout {
-                  anchors.centerIn: parent
-                  spacing: Style.space(4)
-                  Text {
-                    text: "󰐊"
-                    font.family: Style.font.family
-                    color: runMouse.containsMouse ? Color.background : root.fg
-                  }
-                  Text {
-                    id: runTxt
-                    text: "Sync Now"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                    font.weight: Font.DemiBold
-                    color: runMouse.containsMouse ? Color.background : root.fg
-                  }
-                }
-
-                MouseArea {
-                  id: runMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: {
-                    if (nextTimer) {
-                      root.doAction("sync", nextTimer.service_unit || nextTimer.profile)
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          // 3. Storage Quota Quick Overview
-          Text {
-            text: "Storage Capacity"
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            font.weight: Font.DemiBold
-            color: root.mutedCol
-          }
-
-          Repeater {
-            model: remotes
-            delegate: Rectangle {
-              Layout.fillWidth: true
-              implicitHeight: quotaInner.implicitHeight + Style.space(16)
-              radius: Style.cornerRadius
-              color: root.bg
-              border.width: 1
-              border.color: root.borderCol
-
-              ColumnLayout {
-                id: quotaInner
-                anchors.fill: parent
-                anchors.margins: Style.space(10)
-                spacing: Style.space(6)
-
-                RowLayout {
-                  Layout.fillWidth: true
-                  spacing: Style.space(8)
-
-                  Text {
-                    text: modelData.icon
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.heading
-                    color: root.accentCol
-                  }
-
-                  Text {
-                    text: modelData.name + " (" + modelData.provider + ")"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    font.weight: Font.DemiBold
-                    color: root.fg
-                  }
-
-                  Item { Layout.fillWidth: true }
-
-                  Text {
-                    text: modelData.used_percent + "% Used"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    font.weight: Font.Bold
-                    color: root.accentCol
-                  }
-                }
-
-                // Progress Bar
-                Rectangle {
-                  Layout.fillWidth: true
-                  height: Style.space(6)
-                  radius: Style.space(3)
-                  color: root.brightCol
-
-                  Rectangle {
-                    height: parent.height
-                    width: parent.width * (Math.min(100, Math.max(0, modelData.used_percent)) / 100.0)
-                    radius: Style.space(3)
-                    color: root.accentCol
-                  }
-                }
-
-                RowLayout {
-                  Layout.fillWidth: true
-                  Text {
-                    text: "Used: " + modelData.used_formatted + "  ·  Free: " + modelData.free_formatted + "  ·  Total: " + modelData.total_formatted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.mutedCol
-                  }
+                model: root.timers
+                delegate: Rectangle {
+                  required property var modelData
+                  visible: modelData.next_hour >= 0
+                  x: Math.min(ruler.width - width, Math.max(0, Model.calculateTimelineX(modelData.next_hour, ruler.width) - width / 2))
+                  y: Style.space(3)
+                  width: Style.space(7)
+                  height: Style.space(7)
+                  radius: width / 2
+                  color: Color.accent
                 }
               }
             }
           }
         }
+
+        Text {
+          text: "Timers (" + root.timers.length + ")"
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Text {
+          visible: root.timers.length === 0
+          text: "No rclone systemd timers or cron entries found."
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Repeater {
+          model: root.timers
+          delegate: Card {
+            required property var modelData
+            implicitHeight: timerRow.implicitHeight + Style.space(20)
+            Row {
+              id: timerRow
+              anchors.fill: parent
+              anchors.margins: Style.space(10)
+              spacing: Style.space(10)
+
+              Column {
+                width: parent.width - runTimerBtn.width - parent.spacing
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+
+                Row {
+                  spacing: Style.space(6)
+                  Text {
+                    text: (modelData.is_running ? "󰑮  " : "") + modelData.profile
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                  }
+                  Pill {
+                    anchors.verticalCenter: parent.verticalCenter
+                    label: modelData.scope
+                  }
+                }
+
+                MetaLine {
+                  visible: Boolean(modelData.local_path)
+                  text: "󰉋 " + modelData.local_path + (modelData.remote_path ? ("  →  󰅟 " + modelData.remote_path) : "")
+                }
+                MetaLine {
+                  text: "next " + modelData.next_formatted + " · last " + modelData.last_formatted
+                }
+              }
+
+              Button {
+                id: runTimerBtn
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰐊"
+                iconSize: Style.font.caption
+                foreground: root.foreground
+                bordered: true
+                horizontalPadding: Style.space(7)
+                verticalPadding: Style.space(5)
+                tooltipText: "Run now"
+                onClicked: root.doAction("sync", modelData.service_unit || modelData.profile)
+              }
+            }
+          }
+        }
       }
+    }
 
-      // =========================================================== TAB 1: SCHEDULES & TIMELINE
-      Flickable {
-        anchors.fill: parent
-        visible: root.currentTab === 1
-        contentHeight: schedulesCol.implicitHeight
-        clip: true
+    // ------------------------------------------------------------- Remotes
+    Flickable {
+      anchors.fill: parent
+      visible: root.installed && root.currentTab === 2
+      contentHeight: remotesCol.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
 
-        ColumnLayout {
-          id: schedulesCol
-          width: parent.width
-          spacing: Style.space(12)
+      Column {
+        id: remotesCol
+        width: parent.width
+        spacing: Style.space(8)
 
-          // 24-Hour Timeline Visualizer Card
-          Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: timelineCol.implicitHeight + Style.space(16)
-            radius: Style.cornerRadius
-            color: root.bg
-            border.width: 1
-            border.color: root.borderCol
+        Text {
+          visible: root.remotes.length === 0
+          text: "No remotes configured (rclone config)."
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
 
-            ColumnLayout {
-              id: timelineCol
+        Repeater {
+          model: root.remotes
+          delegate: Card {
+            required property var modelData
+            implicitHeight: remoteCol.implicitHeight + Style.space(20)
+            Column {
+              id: remoteCol
+              anchors.fill: parent
+              anchors.margins: Style.space(10)
+              spacing: Style.space(6)
+
+              Row {
+                width: parent.width
+                spacing: Style.space(8)
+                Text {
+                  text: modelData.icon
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.iconLarge
+                }
+                Column {
+                  width: parent.width - parent.spacing - 24
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(1)
+                  Text {
+                    text: modelData.name + ":"
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                  }
+                  MetaLine { text: modelData.provider + " (" + modelData.type + ")" }
+                }
+              }
+
+              Rectangle {
+                visible: modelData.has_quota
+                width: parent.width
+                height: Style.space(5)
+                radius: height / 2
+                color: root.track
+                Rectangle {
+                  width: parent.width * (Model.formatPercent(modelData.used_percent) / 100)
+                  height: parent.height
+                  radius: height / 2
+                  color: Color.accent
+                }
+              }
+
+              MetaLine {
+                visible: modelData.has_quota
+                text: "used " + modelData.used_formatted + " · free " + modelData.free_formatted
+                  + " · total " + modelData.total_formatted
+                  + (modelData.trash_formatted && modelData.trash_formatted !== "0 B" ? (" · trash " + modelData.trash_formatted) : "")
+              }
+              MetaLine {
+                visible: !modelData.has_quota
+                text: "quota not reported by this remote"
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------- Mounts
+    Flickable {
+      anchors.fill: parent
+      visible: root.installed && root.currentTab === 3
+      contentHeight: mountsCol.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+
+      Column {
+        id: mountsCol
+        width: parent.width
+        spacing: Style.space(8)
+
+        Text {
+          visible: root.mounts.length === 0
+          text: "No active rclone FUSE mounts."
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Repeater {
+          model: root.mounts
+          delegate: Card {
+            required property var modelData
+            implicitHeight: mountRow.implicitHeight + Style.space(20)
+            Row {
+              id: mountRow
               anchors.fill: parent
               anchors.margins: Style.space(10)
               spacing: Style.space(8)
 
-              RowLayout {
-                Layout.fillWidth: true
+              Column {
+                width: parent.width - mountActions.width - parent.spacing
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
                 Text {
-                  text: "24-Hour Projected Schedule Timeline"
-                  font.family: Style.font.family
+                  width: parent.width
+                  text: "󱂵  " + modelData.target
+                  color: root.foreground
+                  font.family: root.fontFamily
                   font.pixelSize: Style.font.bodySmall
-                  font.weight: Font.DemiBold
-                  color: root.fg
+                  font.bold: true
+                  elide: Text.ElideMiddle
                 }
-                Item { Layout.fillWidth: true }
-                Text {
-                  text: "00:00 ➔ 24:00"
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  color: root.mutedCol
-                }
+                MetaLine { text: modelData.source }
               }
 
-              // Timeline ruler container
-              Rectangle {
-                id: rulerBox
-                Layout.fillWidth: true
-                height: Style.space(36)
-                radius: Style.cornerRadius
-                color: root.brightCol
-
-                // Grid lines at 0h, 6h, 12h, 18h, 24h
-                Repeater {
-                  model: [0, 6, 12, 18, 24]
-                  delegate: Item {
-                    x: (modelData / 24.0) * (rulerBox.width - Style.space(20)) + Style.space(10)
-                    height: rulerBox.height
-                    width: 1
-
-                    Rectangle {
-                      anchors.top: parent.top
-                      anchors.bottom: parent.bottom
-                      anchors.bottomMargin: Style.space(14)
-                      width: 1
-                      color: root.borderCol
-                    }
-
-                    Text {
-                      anchors.bottom: parent.bottom
-                      anchors.bottomMargin: Style.space(2)
-                      anchors.horizontalCenter: parent.horizontalCenter
-                      text: (modelData < 10 ? "0" + modelData : modelData) + ":00"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption - 1
-                      color: root.mutedCol
-                    }
-                  }
+              Row {
+                id: mountActions
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(4)
+                Button {
+                  iconText: "󰝰"
+                  iconSize: Style.font.caption
+                  foreground: root.foreground
+                  bordered: true
+                  horizontalPadding: Style.space(7)
+                  verticalPadding: Style.space(5)
+                  tooltipText: "Open folder"
+                  onClicked: root.doAction("open_folder", modelData.target)
                 }
-
-                // Timer markers on the ruler
-                Repeater {
-                  model: timers
-                  delegate: Rectangle {
-                    visible: modelData.next_hour >= 0
-                    x: Math.max(0, Math.min(rulerBox.width - Style.space(12), (modelData.next_hour / 24.0) * (rulerBox.width - Style.space(20)) + Style.space(4)))
-                    y: Style.space(4)
-                    width: Style.space(12)
-                    height: Style.space(16)
-                    radius: Style.space(3)
-                    color: root.accentCol
-
-                    Text {
-                      anchors.centerIn: parent
-                      text: "󰑮"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption - 1
-                      color: Color.background
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          // Timer List
-          Text {
-            text: "Configured Timers & Jobs (" + timers.length + ")"
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            font.weight: Font.DemiBold
-            color: root.mutedCol
-          }
-
-          Repeater {
-            model: timers
-            delegate: Rectangle {
-              Layout.fillWidth: true
-              implicitHeight: timerItemCol.implicitHeight + Style.space(16)
-              radius: Style.cornerRadius
-              color: root.bg
-              border.width: 1
-              border.color: root.borderCol
-
-              RowLayout {
-                id: timerItemCol
-                anchors.fill: parent
-                anchors.margins: Style.space(10)
-                spacing: Style.space(10)
-
-                Rectangle {
-                  width: Style.space(32)
-                  height: Style.space(32)
-                  radius: Style.cornerRadius
-                  color: root.brightCol
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: modelData.is_running ? "󰑮" : "󱡶"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    color: modelData.is_running ? root.accentCol : root.fg
-                  }
-                }
-
-                ColumnLayout {
-                  Layout.fillWidth: true
-                  spacing: Style.space(2)
-
-                  RowLayout {
-                    spacing: Style.space(6)
-                    Text {
-                      text: modelData.profile
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      font.weight: Font.DemiBold
-                      color: root.fg
-                    }
-
-                    Rectangle {
-                      height: Style.space(16)
-                      width: scopeTxt.implicitWidth + Style.space(8)
-                      radius: Style.space(8)
-                      color: root.brightCol
-
-                      Text {
-                        id: scopeTxt
-                        anchors.centerIn: parent
-                        text: modelData.scope
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption - 1
-                        color: root.mutedCol
-                      }
-                    }
-                  }
-
-                  Text {
-                    visible: Boolean(modelData.local_path)
-                    text: "📁 " + modelData.local_path + (modelData.remote_path ? (" ➔ ☁️ " + modelData.remote_path) : "")
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.mutedCol
-                    elide: Text.ElideMiddle
-                  }
-
-                  Text {
-                    text: "Next: " + modelData.next_formatted + "  ·  Last: " + modelData.last_formatted + "  ·  Unit: " + modelData.timer_unit
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.mutedCol
-                  }
-                }
-
-                Rectangle {
-                  implicitHeight: Style.space(28)
-                  implicitWidth: Style.space(28)
-                  radius: Style.cornerRadius
-                  color: runTimerMouse.containsMouse ? root.accentCol : root.brightCol
-                  border.width: 1
-                  border.color: root.borderCol
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: "󰐊"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: runTimerMouse.containsMouse ? Color.background : root.fg
-                  }
-
-                  MouseArea {
-                    id: runTimerMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.doAction("sync", modelData.service_unit || modelData.profile)
-                  }
+                Button {
+                  text: "Unmount"
+                  fontSize: Style.font.caption
+                  foreground: root.foreground
+                  bordered: true
+                  horizontalPadding: Style.space(7)
+                  verticalPadding: Style.space(4)
+                  onClicked: root.doAction("unmount", modelData.target)
                 }
               }
             }
           }
         }
       }
+    }
 
-      // =========================================================== TAB 2: REMOTES & STORAGE
-      Flickable {
-        anchors.fill: parent
-        visible: root.currentTab === 2
-        contentHeight: remotesCol.implicitHeight
-        clip: true
+    // ------------------------------------------------------------- History
+    Flickable {
+      anchors.fill: parent
+      visible: root.installed && root.currentTab === 4
+      contentHeight: historyCol.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
 
-        ColumnLayout {
-          id: remotesCol
-          width: parent.width
-          spacing: Style.space(10)
+      Column {
+        id: historyCol
+        width: parent.width
+        spacing: Style.space(4)
 
-          Repeater {
-            model: remotes
-            delegate: Rectangle {
-              Layout.fillWidth: true
-              implicitHeight: remoteCardCol.implicitHeight + Style.space(16)
-              radius: Style.cornerRadius
-              color: root.bg
-              border.width: 1
-              border.color: root.borderCol
-
-              ColumnLayout {
-                id: remoteCardCol
-                anchors.fill: parent
-                anchors.margins: Style.space(12)
-                spacing: Style.space(8)
-
-                RowLayout {
-                  Layout.fillWidth: true
-                  spacing: Style.space(10)
-
-                  Rectangle {
-                    width: Style.space(36)
-                    height: Style.space(36)
-                    radius: Style.cornerRadius
-                    color: root.brightCol
-
-                    Text {
-                      anchors.centerIn: parent
-                      text: modelData.icon
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.heading
-                      color: root.accentCol
-                    }
-                  }
-
-                  ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: Style.space(2)
-
-                    Text {
-                      text: modelData.name + ":"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.heading
-                      font.weight: Font.Bold
-                      color: root.fg
-                    }
-
-                    Text {
-                      text: "Provider: " + modelData.provider + " (" + modelData.type + ")"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      color: root.mutedCol
-                    }
-                  }
-
-                  Rectangle {
-                    visible: modelData.has_quota
-                    height: Style.space(20)
-                    width: pctTxt.implicitWidth + Style.space(12)
-                    radius: Style.space(10)
-                    color: root.accentCol
-
-                    Text {
-                      id: pctTxt
-                      anchors.centerIn: parent
-                      text: modelData.used_percent + "%"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                      color: Color.background
-                    }
-                  }
-                }
-
-                // Quota Progress bar
-                Rectangle {
-                  visible: modelData.has_quota
-                  Layout.fillWidth: true
-                  height: Style.space(8)
-                  radius: Style.space(4)
-                  color: root.brightCol
-
-                  Rectangle {
-                    height: parent.height
-                    width: parent.width * (Math.min(100, Math.max(0, modelData.used_percent)) / 100.0)
-                    radius: Style.space(4)
-                    color: root.accentCol
-                  }
-                }
-
-                // Stats breakdown
-                RowLayout {
-                  visible: modelData.has_quota
-                  Layout.fillWidth: true
-                  spacing: Style.space(12)
-
-                  Text {
-                    text: "Used: " + modelData.used_formatted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.fg
-                  }
-
-                  Text {
-                    text: "Free: " + modelData.free_formatted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.fg
-                  }
-
-                  Text {
-                    text: "Total: " + modelData.total_formatted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.fg
-                  }
-
-                  Text {
-                    visible: Boolean(modelData.trash_formatted && modelData.trash_formatted !== "0 B")
-                    text: "Trash: " + modelData.trash_formatted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.mutedCol
-                  }
-                }
-              }
-            }
-          }
+        Text {
+          visible: root.history.length === 0
+          text: "No recent runs in the systemd journal."
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
         }
-      }
 
-      // =========================================================== TAB 3: MOUNTS
-      Flickable {
-        anchors.fill: parent
-        visible: root.currentTab === 3
-        contentHeight: mountsCol.implicitHeight
-        clip: true
+        Repeater {
+          model: root.history
+          delegate: Card {
+            required property var modelData
+            implicitHeight: Style.space(30)
+            Item {
+              anchors.fill: parent
+              anchors.leftMargin: Style.space(8)
+              anchors.rightMargin: Style.space(8)
 
-        ColumnLayout {
-          id: mountsCol
-          width: parent.width
-          spacing: Style.space(10)
-
-          Text {
-            visible: mounts.length === 0
-            text: "No active FUSE rclone mounts detected on this system."
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-            color: root.mutedCol
-          }
-
-          Repeater {
-            model: mounts
-            delegate: Rectangle {
-              Layout.fillWidth: true
-              implicitHeight: mountCardCol.implicitHeight + Style.space(16)
-              radius: Style.cornerRadius
-              color: root.bg
-              border.width: 1
-              border.color: root.borderCol
-
-              RowLayout {
-                id: mountCardCol
-                anchors.fill: parent
-                anchors.margins: Style.space(10)
-                spacing: Style.space(10)
-
-                Rectangle {
-                  width: Style.space(32)
-                  height: Style.space(32)
-                  radius: Style.cornerRadius
-                  color: root.brightCol
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: "󱡶"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    color: root.accentCol
-                  }
-                }
-
-                ColumnLayout {
-                  Layout.fillWidth: true
-                  spacing: Style.space(2)
-
-                  Text {
-                    text: modelData.target
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    font.weight: Font.DemiBold
-                    color: root.fg
-                  }
-
-                  Text {
-                    text: "Source: " + modelData.source + "  ·  FUSE (rw)"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.mutedCol
-                  }
-                }
-
-                // Open Folder Button
-                Rectangle {
-                  implicitHeight: Style.space(28)
-                  implicitWidth: Style.space(28)
-                  radius: Style.cornerRadius
-                  color: openFolderMouse.containsMouse ? root.brightCol : "transparent"
-                  border.width: 1
-                  border.color: root.borderCol
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: "󰉍"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    color: root.fg
-                  }
-
-                  MouseArea {
-                    id: openFolderMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.doAction("open_folder", modelData.target)
-                  }
-                }
-
-                // Unmount Button
-                Rectangle {
-                  implicitHeight: Style.space(28)
-                  implicitWidth: unmountTxt.implicitWidth + Style.space(16)
-                  radius: Style.cornerRadius
-                  color: unmountMouse.containsMouse ? root.brightCol : "transparent"
-                  border.width: 1
-                  border.color: root.borderCol
-
-                  Text {
-                    id: unmountTxt
-                    anchors.centerIn: parent
-                    text: "Unmount"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    color: root.fg
-                  }
-
-                  MouseArea {
-                    id: unmountMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.doAction("unmount", modelData.target)
-                  }
-                }
+              Text {
+                id: histIcon
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData.status === "success" ? "󰄬" : "󰅚"
+                color: modelData.status === "success" ? Color.accent : Color.urgent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
               }
-            }
-          }
-        }
-      }
-
-      // =========================================================== TAB 4: HISTORY
-      Flickable {
-        anchors.fill: parent
-        visible: root.currentTab === 4
-        contentHeight: historyCol.implicitHeight
-        clip: true
-
-        ColumnLayout {
-          id: historyCol
-          width: parent.width
-          spacing: Style.space(8)
-
-          Text {
-            visible: history.length === 0
-            text: "No recent sync runs found in systemd journal."
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-            color: root.mutedCol
-          }
-
-          Repeater {
-            model: history
-            delegate: Rectangle {
-              Layout.fillWidth: true
-              height: Style.space(36)
-              radius: Style.cornerRadius
-              color: root.bg
-              border.width: 1
-              border.color: root.borderCol
-
-              RowLayout {
-                anchors.fill: parent
-                anchors.margins: Style.space(8)
-                spacing: Style.space(8)
-
-                Text {
-                  text: modelData.status === "success" ? "✅" : "❌"
-                  font.pixelSize: Style.font.caption
-                }
-
-                Text {
-                  text: modelData.profile
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.weight: Font.DemiBold
-                  color: root.fg
-                }
-
-                Text {
-                  text: modelData.message
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  color: root.mutedCol
-                  elide: Text.ElideRight
-                  Layout.fillWidth: true
-                }
-
-                Text {
-                  text: modelData.time
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  color: root.mutedCol
-                }
+              Text {
+                id: histProfile
+                anchors.left: histIcon.right
+                anchors.leftMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData.profile
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+              Text {
+                id: histTime
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData.time
+                color: root.muted
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+              Text {
+                anchors.left: histProfile.right
+                anchors.leftMargin: Style.space(8)
+                anchors.right: histTime.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData.message
+                color: root.muted
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
               }
             }
           }

@@ -16,7 +16,7 @@ Panel {
 
   property var status: Model.emptyStatus()
   readonly property bool isSyncRunning: Boolean(status && status.is_sync_running)
-  readonly property string icon: isSyncRunning ? "󰑮" : "󰜱"
+  readonly property string icon: isSyncRunning ? "󰑮" : "󰅟"
 
   function runAction(cmd, arg1, arg2) {
     var args = ["bash", root.pluginPath + "/scripts/action.sh", cmd]
@@ -91,7 +91,7 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    contentWidth: panel.fittedContentWidth(Style.space(700))
+    contentWidth: panel.fittedContentWidth(Style.space(400))
     contentHeight: panel.fittedContentHeight(dashboard.implicitHeight)
 
     RcloneDashboard {
@@ -104,6 +104,7 @@ Panel {
       status: root.status
       popupOpen: root.opened
       onRunAction: function(cmd, arg1, arg2) { root.runAction(cmd, arg1, arg2) }
+      onRefreshRequested: root.refreshStatus()
       onCloseRequested: root.close()
     }
   }
