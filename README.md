@@ -4,6 +4,9 @@ A universal [Rclone](https://rclone.org/) bar widget and interactive popup dashb
 
 Real-time monitoring of active sync processes, systemd & cron timers with a 24-hour projected schedule timeline, remote cloud storage quota gauges, and active FUSE mounts with 1-click controls.
 
+![Overview tab — bandwidth graph, mounts, and the next scheduled job](preview.png)
+![Storages tab — per-remote capacity](preview-storages.png)
+
 ---
 
 ## Highlights
@@ -41,7 +44,9 @@ Real-time monitoring of active sync processes, systemd & cron timers with a 24-h
 ├── tests/
 │   ├── test_model.js          # JavaScript unit tests
 │   └── test_status.py         # Python unit tests
-├── VERSION                    # 1.0.0
+├── preview.png                # Overview tab screenshot
+├── preview-storages.png       # Storages tab screenshot
+├── VERSION                    # Semantic version
 ├── LICENSE                    # MIT License
 └── README.md                  # Documentation
 ```
